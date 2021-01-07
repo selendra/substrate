@@ -387,7 +387,6 @@ pub trait Trie {
 
 /// Interface that provides miscellaneous functions for communicating between the runtime and the node.
 #[runtime_interface]
-pub trait Misc {
 	/// Print a number.
 	fn print_num(val: u64) {
 		log::debug!(target: "runtime", "{}", val);
