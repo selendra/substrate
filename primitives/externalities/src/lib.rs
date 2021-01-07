@@ -170,6 +170,9 @@ pub trait Externalities: ExtensionStore {
 		value: Option<Vec<u8>>,
 	);
 
+	/// Get the identity of the chain.
+	fn chain_id(&self) -> u64;
+
 	/// Get the trie root of the current storage map.
 	///
 	/// This will also update all child storage keys in the top-level storage map.
