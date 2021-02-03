@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2017-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2017-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,6 +44,7 @@ use frame_support::{
 	storage, traits::KeyOwnerProofSystem, weights::{Pays, Weight}, Parameter,
 };
 use frame_system::{ensure_none, ensure_root, ensure_signed};
+use pallet_finality_tracker::OnFinalizationStalled;
 use sp_runtime::{
 	generic::DigestItem,
 	traits::Zero,
@@ -67,9 +68,9 @@ pub use equivocation::{
 	HandleEquivocation,
 };
 
-pub trait Config: frame_system::Config {
+pub trait Trait: frame_system::Trait {
 	/// The event type of this module.
-	type Event: From<Event> + Into<<Self as frame_system::Config>::Event>;
+	type Event: From<Event> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// The function call.
 	type Call: From<Call<Self>>;
@@ -188,7 +189,7 @@ decl_event! {
 }
 
 decl_error! {
-	pub enum Error for Module<T: Config> {
+	pub enum Error for Module<T: Trait> {
 		/// Attempt to signal GRANDPA pause when the authority set isn't live
 		/// (either paused or already pending pause).
 		PauseFailed,
@@ -209,7 +210,7 @@ decl_error! {
 }
 
 decl_storage! {
-	trait Store for Module<T: Config> as GrandpaFinality {
+	trait Store for Module<T: Trait> as GrandpaFinality {
 		/// State of the current authority set.
 		State get(fn state): StoredState<T::BlockNumber> = StoredState::Live;
 
@@ -241,7 +242,7 @@ decl_storage! {
 }
 
 decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		type Error = Error<T>;
 
 		fn deposit_event() = default;
@@ -372,7 +373,7 @@ decl_module! {
 	}
 }
 
-impl<T: Config> Module<T> {
+impl<T: Trait> Module<T> {
 	/// Get the current set of authorities, along with their respective weights.
 	pub fn grandpa_authorities() -> AuthorityList {
 		storage::unhashed::get_or_default::<VersionedAuthorityList>(GRANDPA_AUTHORITIES_KEY).into()
@@ -574,21 +575,14 @@ impl<T: Config> Module<T> {
 		)
 		.ok()
 	}
-
-	fn on_stalled(further_wait: T::BlockNumber, median: T::BlockNumber) {
-		// when we record old authority sets we could try to figure out _who_
-		// failed. until then, we can't meaningfully guard against
-		// `next == last` the way that normal session changes do.
-		<Stalled<T>>::put((further_wait, median));
-	}
 }
 
-impl<T: Config> sp_runtime::BoundToRuntimeAppPublic for Module<T> {
+impl<T: Trait> sp_runtime::BoundToRuntimeAppPublic for Module<T> {
 	type Public = AuthorityId;
 }
 
-impl<T: Config> pallet_session::OneSessionHandler<T::AccountId> for Module<T>
-	where T: pallet_session::Config
+impl<T: Trait> pallet_session::OneSessionHandler<T::AccountId> for Module<T>
+	where T: pallet_session::Trait
 {
 	type Key = AuthorityId;
 
@@ -639,5 +633,14 @@ impl<T: Config> pallet_session::OneSessionHandler<T::AccountId> for Module<T>
 
 	fn on_disabled(i: usize) {
 		Self::deposit_log(ConsensusLog::OnDisabled(i as u64))
+	}
+}
+
+impl<T: Trait> OnFinalizationStalled<T::BlockNumber> for Module<T> {
+	fn on_stalled(further_wait: T::BlockNumber, median: T::BlockNumber) {
+		// when we record old authority sets, we can use `pallet_finality_tracker::median`
+		// to figure out _who_ failed. until then, we can't meaningfully guard
+		// against `next == last` the way that normal session changes do.
+		<Stalled<T>>::put((further_wait, median));
 	}
 }

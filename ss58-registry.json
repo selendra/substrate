@@ -66,8 +66,8 @@
 		},
 		{
 			"prefix": 6,
-			"network": "bifrost",
-			"displayName": "Bifrost",
+			"network": "bitfrost",
+			"displayName": "Bitfrost",
 			"symbols": ["BNC"],
 			"decimals": [12],
 			"standardAccount": "*25519",
@@ -98,7 +98,7 @@
 			"symbols": ["REY"],
 			"decimals": [18],
 			"standardAccount": "*25519",
-			"website": "http://laminar.network/"
+			"website": ["http://laminar.network/"]
 		},
 		{
 			"prefix": 10,
@@ -116,7 +116,7 @@
 			"symbols": ["LAMI"],
 			"decimals": [18],
 			"standardAccount": "*25519",
-			"website": "http://laminar.network/"
+			"website": ["http://laminar.network/"]
 		},
 		{
 			"prefix": 12,
@@ -135,24 +135,6 @@
 			"decimals": null,
 			"standardAccount": "*25519",
 			"website": "https://www.substratee.com"
-		},
-		{
-			"prefix": 14,
-			"network": "totem",
-			"displayName": "Totem",
-			"symbols": ["XTX"],
-			"decimals": [0],
-			"standardAccount": "*25519",
-			"website": "https://totemaccounting.com"
-		},
-		{
-			"prefix": 15,
-			"network": "synesthesia",
-			"displayName": "Synesthesia",
-			"symbols": ["SYN"],
-			"decimals": [12],
-			"standardAccount": "*25519",
-			"website": "https://synesthesia.network/"
 		},
 		{
 			"prefix": 16,
@@ -175,47 +157,38 @@
 		{
 			"prefix": 18,
 			"network": "darwinia",
-			"displayName": "Darwinia Network",
-			"symbols": ["RING", "KTON"],
-			"decimals": [9, 9],
+			"displayName": "Darwinia Chain",
+			"symbols": null,
+			"decimals": null,
 			"standardAccount": "*25519",
-			"website": "https://darwinia.network/"
-		},
-		{
-			"prefix": 19,
-			"network": "geek",
-			"displayName": "GeekCash",
-			"symbols": ["GEEK"],
-			"decimals": [12],
-			"standardAccount": "*25519",
-			"website": "https://geekcash.org"
+			"website": null
 		},
 		{
 			"prefix": 20,
 			"network": "stafi",
 			"displayName": "Stafi",
-			"symbols": ["FIS"],
-			"decimals": [12],
+			"symbols": null,
+			"decimals": null,
 			"standardAccount": "*25519",
-			"website": "https://stafi.io"
+			"website": null
 		},
 		{
 			"prefix": 21,
 			"network": "dock-testnet",
 			"displayName": "Dock Testnet",
-			"symbols": ["DCK"],
-			"decimals": [6],
+			"symbols": null,
+			"decimals": null,
 			"standardAccount": "*25519",
-			"website": "https://dock.io"
+			"website": null
 		},
 		{
 			"prefix": 22,
 			"network": "dock-mainnet",
 			"displayName": "Dock Mainnet",
-			"symbols": ["DCK"],
-			"decimals": [6],
+			"symbols": null,
+			"decimals": null,
 			"standardAccount": "*25519",
-			"website": "https://dock.io"
+			"website": null
 		},
 		{
 			"prefix": 23,
@@ -225,24 +198,6 @@
 			"decimals": null,
 			"standardAccount": "*25519",
 			"website": null
-		},
-		{
-			"prefix": 24,
-			"network": "zero",
-			"displayName": "ZERO",
-			"symbols": ["PLAY"],
-			"decimals": [18],
-			"standardAccount": "*25519",
-			"website": "https://zero.io"
-		},
-		{
-			"prefix": 25,
-			"network": "zero-alphaville",
-			"displayName": "ZERO Alphaville",
-			"symbols": ["PLAY"],
-			"decimals": [18],
-			"standardAccount": "*25519",
-			"website": "https://zero.io"
 		},
 		{
 			"prefix": 28,
@@ -257,10 +212,10 @@
 			"prefix": 30,
 			"network": "phala",
 			"displayName": "Phala Network",
-			"symbols": ["PHA"],
-			"decimals": [12],
+			"symbols": null,
+			"decimals": null,
 			"standardAccount": "*25519",
-			"website": "https://phala.network"
+			"website": null
 		},
 		{
 			"prefix": 32,
@@ -281,15 +236,6 @@
 			"website": null
 		},
 		{
-			"prefix": 35,
-			"network": "vln",
-			"displayName": "Valiu Liquidity Network",
-			"symbols": ["USDv"],
-			"decimals": [15],
-			"standardAccount": "*25519",
-			"website": "https://valiu.com/"
-		},
-		{
 			"prefix": 36,
 			"network": "centrifuge",
 			"displayName": "Centrifuge Chain",
@@ -297,24 +243,6 @@
 			"decimals": [18],
 			"standardAccount": "*25519",
 			"website": "https://centrifuge.io/"
-		},
-		{
-			"prefix": 37,
-			"network": "nodle",
-			"displayName": "Nodle Chain",
-			"symbols": ["NODL"],
-			"decimals": [18],
-			"standardAccount": "*25519",
-			"website": "https://nodle.io/"
-		},
-		{
-			"prefix": 38,
-			"network": "kilt",
-			"displayName": "KILT Chain",
-			"symbols": ["KILT"],
-			"decimals": [18],
-			"standardAccount": "*25519",
-			"website": "https://kilt.io/"
 		},
 		{
 			"prefix": 39,
@@ -333,15 +261,6 @@
 			"decimals": [18],
 			"standardAccount": "*25519",
 			"website": "https://mathwallet.org"
-		},
-		{
-			"prefix": 41,
-			"network": "poli",
-			"displayName": "Polimec Chain",
-			"symbols": null,
-			"decimals": null,
-			"standardAccount": "*25519",
-			"website": "https://polimec.io/"
 		},
 		{
 			"prefix": 42,
@@ -365,10 +284,10 @@
 			"prefix": 44,
 			"network": "chainx",
 			"displayName": "ChainX",
-			"symbols": ["PCX"],
-			"decimals": [8],
+			"symbols": null,
+			"decimals": null,
 			"standardAccount": "*25519",
-			"website": "https://chainx.org/"
+			"website": null
 		},
 		{
 			"prefix": 46,

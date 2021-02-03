@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2020-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +19,7 @@
 
 use super::*;
 
-use frame_benchmarking::{benchmarks, account, whitelist_account};
+use frame_benchmarking::{benchmarks, account};
 use frame_support::{
 	IterableStorageMap,
 	traits::{Currency, Get, EnsureOrigin, OnInitialize, UnfilteredDispatchable, schedule::DispatchTime},
@@ -30,25 +30,25 @@ use sp_runtime::traits::{Bounded, One};
 use crate::Module as Democracy;
 
 const SEED: u32 = 0;
-const MAX_REFERENDUMS: u32 = 99;
+const MAX_REFERENDUMS: u32 = 100;
 const MAX_SECONDERS: u32 = 100;
 const MAX_BYTES: u32 = 16_384;
 
-fn assert_last_event<T: Config>(generic_event: <T as Config>::Event) {
+fn assert_last_event<T: Trait>(generic_event: <T as Trait>::Event) {
 	let events = System::<T>::events();
-	let system_event: <T as frame_system::Config>::Event = generic_event.into();
+	let system_event: <T as frame_system::Trait>::Event = generic_event.into();
 	// compare to the last event record
 	let EventRecord { event, .. } = &events[events.len() - 1];
 	assert_eq!(event, &system_event);
 }
 
-fn funded_account<T: Config>(name: &'static str, index: u32) -> T::AccountId {
+fn funded_account<T: Trait>(name: &'static str, index: u32) -> T::AccountId {
 	let caller: T::AccountId = account(name, index, SEED);
 	T::Currency::make_free_balance_be(&caller, BalanceOf::<T>::max_value());
 	caller
 }
 
-fn add_proposal<T: Config>(n: u32) -> Result<T::Hash, &'static str> {
+fn add_proposal<T: Trait>(n: u32) -> Result<T::Hash, &'static str> {
 	let other = funded_account::<T>("proposer", n);
 	let value = T::MinimumDeposit::get();
 	let proposal_hash: T::Hash = T::Hashing::hash_of(&n);
@@ -62,8 +62,8 @@ fn add_proposal<T: Config>(n: u32) -> Result<T::Hash, &'static str> {
 	Ok(proposal_hash)
 }
 
-fn add_referendum<T: Config>(n: u32) -> Result<ReferendumIndex, &'static str> {
-	let proposal_hash: T::Hash = T::Hashing::hash_of(&n);
+fn add_referendum<T: Trait>(n: u32) -> Result<ReferendumIndex, &'static str> {
+	let proposal_hash = add_proposal::<T>(n)?;
 	let vote_threshold = VoteThreshold::SimpleMajority;
 
 	Democracy::<T>::inject_referendum(
@@ -84,7 +84,7 @@ fn add_referendum<T: Config>(n: u32) -> Result<ReferendumIndex, &'static str> {
 	Ok(referendum_index)
 }
 
-fn account_vote<T: Config>(b: BalanceOf<T>) -> AccountVote<BalanceOf<T>> {
+fn account_vote<T: Trait>(b: BalanceOf<T>) -> AccountVote<BalanceOf<T>> {
 	let v = Vote {
 		aye: true,
 		conviction: Conviction::Locked1x,
@@ -97,20 +97,15 @@ fn account_vote<T: Config>(b: BalanceOf<T>) -> AccountVote<BalanceOf<T>> {
 }
 
 benchmarks! {
+	_ { }
+
 	propose {
-		let p = T::MaxProposals::get();
-
-		for i in 0 .. (p - 1) {
-			add_proposal::<T>(i)?;
-		}
-
 		let caller = funded_account::<T>("caller", 0);
 		let proposal_hash: T::Hash = T::Hashing::hash_of(&0);
 		let value = T::MinimumDeposit::get();
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller), proposal_hash, value.into())
 	verify {
-		assert_eq!(Democracy::<T>::public_props().len(), p as usize, "Proposals not created.");
+		assert_eq!(Democracy::<T>::public_props().len(), 1, "Proposals not created.");
 	}
 
 	second {
@@ -127,7 +122,6 @@ benchmarks! {
 
 		let deposits = Democracy::<T>::deposit_of(0).ok_or("Proposal not created")?;
 		assert_eq!(deposits.0.len(), (s + 1) as usize, "Seconds not recorded");
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller), 0, u32::max_value())
 	verify {
 		let deposits = Democracy::<T>::deposit_of(0).ok_or("Proposal not created")?;
@@ -152,7 +146,7 @@ benchmarks! {
 		assert_eq!(votes.len(), r as usize, "Votes were not recorded.");
 
 		let referendum_index = add_referendum::<T>(r)?;
-		whitelist_account!(caller);
+
 	}: vote(RawOrigin::Signed(caller.clone()), referendum_index, account_vote)
 	verify {
 		let votes = match VotingOf::<T>::get(&caller) {
@@ -185,7 +179,6 @@ benchmarks! {
 		let referendum_index = Democracy::<T>::referendum_count() - 1;
 
 		// This tests when a user changes a vote
-		whitelist_account!(caller);
 	}: vote(RawOrigin::Signed(caller.clone()), referendum_index, new_vote)
 	verify {
 		let votes = match VotingOf::<T>::get(&caller) {
@@ -207,31 +200,6 @@ benchmarks! {
 		let referendum_index = add_referendum::<T>(0)?;
 		let call = Call::<T>::emergency_cancel(referendum_index);
 		assert!(Democracy::<T>::referendum_status(referendum_index).is_ok());
-	}: { call.dispatch_bypass_filter(origin)? }
-	verify {
-		// Referendum has been canceled
-		assert!(Democracy::<T>::referendum_status(referendum_index).is_err());
-	}
-
-	blacklist {
-		let p in 1 .. T::MaxProposals::get();
-
-		// Place our proposal at the end to make sure it's worst case.
-		for i in 0 .. p - 1 {
-			add_proposal::<T>(i)?;
-		}
-		// We should really add a lot of seconds here, but we're not doing it elsewhere.
-
-		// Place our proposal in the external queue, too.
-		let hash = T::Hashing::hash_of(&0);
-		assert!(Democracy::<T>::external_propose(T::ExternalOrigin::successful_origin(), hash.clone()).is_ok());
-
-		// Add a referendum of our proposal.
-		let referendum_index = add_referendum::<T>(0)?;
-		assert!(Democracy::<T>::referendum_status(referendum_index).is_ok());
-
-		let call = Call::<T>::blacklist(hash, Some(referendum_index));
-		let origin = T::BlacklistOrigin::successful_origin();
 	}: { call.dispatch_bypass_filter(origin)? }
 	verify {
 		// Referendum has been canceled
@@ -319,15 +287,6 @@ benchmarks! {
 		assert_eq!(new_vetoers.len(), (v + 1) as usize, "vetoers not added");
 	}
 
-	cancel_proposal {
-		let p in 1 .. T::MaxProposals::get();
-
-		// Place our proposal at the end to make sure it's worst case.
-		for i in 0 .. p {
-			add_proposal::<T>(i)?;
-		}
-	}: _(RawOrigin::Root, 0)
-
 	cancel_referendum {
 		let referendum_index = add_referendum::<T>(0)?;
 	}: _(RawOrigin::Root, referendum_index)
@@ -342,8 +301,7 @@ benchmarks! {
 		let referendum_index = add_referendum::<T>(r)?;
 	}: _(RawOrigin::Root, referendum_index)
 
-	// This measures the path of `launch_next` external. Not currently used as we simply
-	// assume the weight is `MaxBlockWeight` when executing.
+	// Note that we have a separate benchmark for `launch_next`
 	#[extra]
 	on_initialize_external {
 		let r in 0 .. MAX_REFERENDUMS;
@@ -383,8 +341,6 @@ benchmarks! {
 		}
 	}
 
-	// This measures the path of `launch_next` public. Not currently used as we simply
-	// assume the weight is `MaxBlockWeight` when executing.
 	#[extra]
 	on_initialize_public {
 		let r in 1 .. MAX_REFERENDUMS;
@@ -396,7 +352,6 @@ benchmarks! {
 		assert_eq!(Democracy::<T>::referendum_count(), r, "referenda not created");
 
 		// Launch public
-		assert!(add_proposal::<T>(r).is_ok(), "proposal not created");
 		LastTabledWasExternal::put(true);
 
 		let block_number = T::LaunchPeriod::get();
@@ -404,7 +359,7 @@ benchmarks! {
 	}: { Democracy::<T>::on_initialize(block_number) }
 	verify {
 		// One extra because of next public
-		assert_eq!(Democracy::<T>::referendum_count(), r + 1, "proposal not accepted");
+		assert_eq!(Democracy::<T>::referendum_count(), r + 1, "referenda not created");
 
 		// All should be finished
 		for i in 0 .. r {
@@ -482,7 +437,6 @@ benchmarks! {
 			_ => return Err("Votes are not direct"),
 		};
 		assert_eq!(votes.len(), r as usize, "Votes were not recorded.");
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller.clone()), new_delegate.clone(), Conviction::Locked1x, delegated_balance)
 	verify {
 		let (target, balance) = match VotingOf::<T>::get(&caller) {
@@ -534,7 +488,6 @@ benchmarks! {
 			_ => return Err("Votes are not direct"),
 		};
 		assert_eq!(votes.len(), r as usize, "Votes were not recorded.");
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller.clone()))
 	verify {
 		// Voting should now be direct
@@ -555,7 +508,6 @@ benchmarks! {
 
 		let caller = funded_account::<T>("caller", 0);
 		let encoded_proposal = vec![1; b as usize];
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller), encoded_proposal.clone())
 	verify {
 		let proposal_hash = T::Hashing::hash(&encoded_proposal[..]);
@@ -577,7 +529,6 @@ benchmarks! {
 
 		let caller = funded_account::<T>("caller", 0);
 		let encoded_proposal = vec![1; b as usize];
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller), encoded_proposal.clone())
 	verify {
 		let proposal_hash = T::Hashing::hash(&encoded_proposal[..]);
@@ -604,7 +555,6 @@ benchmarks! {
 		assert!(Preimages::<T>::contains_key(proposal_hash));
 
 		let caller = funded_account::<T>("caller", 0);
-		whitelist_account!(caller);
 	}: _(RawOrigin::Signed(caller), proposal_hash.clone(), u32::max_value())
 	verify {
 		let proposal_hash = T::Hashing::hash(&encoded_proposal[..]);
@@ -627,7 +577,6 @@ benchmarks! {
 		}
 
 		let caller = funded_account::<T>("caller", 0);
-		whitelist_account!(caller);
 	}: unlock(RawOrigin::Signed(caller), locker.clone())
 	verify {
 		// Note that we may want to add a `get_lock` api to actually verify
@@ -665,7 +614,6 @@ benchmarks! {
 		Democracy::<T>::remove_vote(RawOrigin::Signed(locker.clone()).into(), referendum_index)?;
 
 		let caller = funded_account::<T>("caller", 0);
-		whitelist_account!(caller);
 	}: unlock(RawOrigin::Signed(caller), locker.clone())
 	verify {
 		let votes = match VotingOf::<T>::get(&locker) {
@@ -697,7 +645,7 @@ benchmarks! {
 		assert_eq!(votes.len(), r as usize, "Votes not created");
 
 		let referendum_index = r - 1;
-		whitelist_account!(caller);
+
 	}: _(RawOrigin::Signed(caller.clone()), referendum_index)
 	verify {
 		let votes = match VotingOf::<T>::get(&caller) {
@@ -726,7 +674,7 @@ benchmarks! {
 		assert_eq!(votes.len(), r as usize, "Votes not created");
 
 		let referendum_index = r - 1;
-		whitelist_account!(caller);
+
 	}: _(RawOrigin::Signed(caller.clone()), caller.clone(), referendum_index)
 	verify {
 		let votes = match VotingOf::<T>::get(&caller) {
@@ -817,8 +765,6 @@ mod tests {
 			assert_ok!(test_benchmark_remove_other_vote::<Test>());
 			assert_ok!(test_benchmark_enact_proposal_execute::<Test>());
 			assert_ok!(test_benchmark_enact_proposal_slash::<Test>());
-			assert_ok!(test_benchmark_blacklist::<Test>());
-			assert_ok!(test_benchmark_cancel_proposal::<Test>());
 		});
 	}
 }

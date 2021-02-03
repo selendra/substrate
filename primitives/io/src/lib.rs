@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2017-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2017-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,13 +38,11 @@ use tracing;
 #[cfg(feature = "std")]
 use sp_core::{
 	crypto::Pair,
-	traits::{CallInWasmExt, TaskExecutorExt, RuntimeSpawnExt},
+	traits::{KeystoreExt, CallInWasmExt, TaskExecutorExt},
 	offchain::{OffchainExt, TransactionPoolExt},
 	hexdisplay::HexDisplay,
 	storage::ChildInfo,
 };
-#[cfg(feature = "std")]
-use sp_keystore::{KeystoreExt, SyncCryptoStore};
 
 use sp_core::{
 	OpaquePeerId, crypto::KeyTypeId, ed25519, sr25519, ecdsa, H256, LogLevel,
@@ -279,35 +277,7 @@ pub trait DefaultChildStorage {
 		storage_key: &[u8],
 	) {
 		let child_info = ChildInfo::new_default(storage_key);
-		self.kill_child_storage(&child_info, None);
-	}
-
-	/// Clear a child storage key.
-	///
-	/// Deletes all keys from the overlay and up to `limit` keys from the backend if
-	/// it is set to `Some`. No limit is applied when `limit` is set to `None`.
-	///
-	/// The limit can be used to partially delete a child trie in case it is too large
-	/// to delete in one go (block).
-	///
-	/// It returns false iff some keys are remaining in
-	/// the child trie after the functions returns.
-	///
-	/// # Note
-	///
-	/// Please note that keys that are residing in the overlay for that child trie when
-	/// issuing this call are all deleted without counting towards the `limit`. Only keys
-	/// written during the current block are part of the overlay. Deleting with a `limit`
-	/// mostly makes sense with an empty overlay for that child trie.
-	///
-	/// Calling this function multiple times per block for the same `storage_key` does
-	/// not make much sense because it is not cumulative when called inside the same block.
-	/// Use this function to distribute the deletion of a single child trie across multiple
-	/// blocks.
-	#[version(2)]
-	fn storage_kill(&mut self, storage_key: &[u8], limit: Option<u32>) -> bool {
-		let child_info = ChildInfo::new_default(storage_key);
-		self.kill_child_storage(&child_info, limit)
+		self.kill_child_storage(&child_info);
 	}
 
 	/// Check a child storage key.
@@ -387,7 +357,7 @@ pub trait Trie {
 
 /// Interface that provides miscellaneous functions for communicating between the runtime and the node.
 #[runtime_interface]
-
+pub trait Misc {
 	/// The current relay chain identifier.
 	fn chain_id(&self) -> u64 {
 		sp_externalities::Externalities::chain_id(*self)
@@ -447,9 +417,10 @@ pub trait Trie {
 pub trait Crypto {
 	/// Returns all `ed25519` public keys for the given key id from the keystore.
 	fn ed25519_public_keys(&mut self, id: KeyTypeId) -> Vec<ed25519::Public> {
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::ed25519_public_keys(keystore, id)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.read()
+			.ed25519_public_keys(id)
 	}
 
 	/// Generate an `ed22519` key for the given key type using an optional `seed` and
@@ -460,9 +431,10 @@ pub trait Crypto {
 	/// Returns the public key.
 	fn ed25519_generate(&mut self, id: KeyTypeId, seed: Option<Vec<u8>>) -> ed25519::Public {
 		let seed = seed.as_ref().map(|s| std::str::from_utf8(&s).expect("Seed is valid utf8!"));
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::ed25519_generate_new(keystore, id, seed)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.write()
+			.ed25519_generate_new(id, seed)
 			.expect("`ed25519_generate` failed")
 	}
 
@@ -476,9 +448,10 @@ pub trait Crypto {
 		pub_key: &ed25519::Public,
 		msg: &[u8],
 	) -> Option<ed25519::Signature> {
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::sign_with(keystore, id, &pub_key.into(), msg)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.read()
+			.sign_with(id, &pub_key.into(), msg)
 			.map(|sig| ed25519::Signature::from_slice(sig.as_slice()))
 			.ok()
 	}
@@ -548,6 +521,7 @@ pub trait Crypto {
 	fn start_batch_verify(&mut self) {
 		let scheduler = self.extension::<TaskExecutorExt>()
 			.expect("No task executor associated with the current context!")
+			.0
 			.clone();
 
 		self.register_extension(VerificationExt(BatchVerifier::new(scheduler)))
@@ -573,9 +547,10 @@ pub trait Crypto {
 
 	/// Returns all `sr25519` public keys for the given key id from the keystore.
 	fn sr25519_public_keys(&mut self, id: KeyTypeId) -> Vec<sr25519::Public> {
-		let keystore = &*** self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::sr25519_public_keys(keystore, id)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.read()
+			.sr25519_public_keys(id)
 	}
 
 	/// Generate an `sr22519` key for the given key type using an optional seed and
@@ -586,9 +561,10 @@ pub trait Crypto {
 	/// Returns the public key.
 	fn sr25519_generate(&mut self, id: KeyTypeId, seed: Option<Vec<u8>>) -> sr25519::Public {
 		let seed = seed.as_ref().map(|s| std::str::from_utf8(&s).expect("Seed is valid utf8!"));
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::sr25519_generate_new(keystore, id, seed)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.write()
+			.sr25519_generate_new(id, seed)
 			.expect("`sr25519_generate` failed")
 	}
 
@@ -602,9 +578,10 @@ pub trait Crypto {
 		pub_key: &sr25519::Public,
 		msg: &[u8],
 	) -> Option<sr25519::Signature> {
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::sign_with(keystore, id, &pub_key.into(), msg)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.read()
+			.sign_with(id, &pub_key.into(), msg)
 			.map(|sig| sr25519::Signature::from_slice(sig.as_slice()))
 			.ok()
 	}
@@ -619,9 +596,10 @@ pub trait Crypto {
 
 	/// Returns all `ecdsa` public keys for the given key id from the keystore.
 	fn ecdsa_public_keys(&mut self, id: KeyTypeId) -> Vec<ecdsa::Public> {
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::ecdsa_public_keys(keystore, id)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.read()
+			.ecdsa_public_keys(id)
 	}
 
 	/// Generate an `ecdsa` key for the given key type using an optional `seed` and
@@ -632,9 +610,10 @@ pub trait Crypto {
 	/// Returns the public key.
 	fn ecdsa_generate(&mut self, id: KeyTypeId, seed: Option<Vec<u8>>) -> ecdsa::Public {
 		let seed = seed.as_ref().map(|s| std::str::from_utf8(&s).expect("Seed is valid utf8!"));
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::ecdsa_generate_new(keystore, id, seed)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.write()
+			.ecdsa_generate_new(id, seed)
 			.expect("`ecdsa_generate` failed")
 	}
 
@@ -648,9 +627,10 @@ pub trait Crypto {
 		pub_key: &ecdsa::Public,
 		msg: &[u8],
 	) -> Option<ecdsa::Signature> {
-		let keystore = &***self.extension::<KeystoreExt>()
-			.expect("No `keystore` associated for the current context!");
-		SyncCryptoStore::sign_with(keystore, id, &pub_key.into(), msg)
+		self.extension::<KeystoreExt>()
+			.expect("No `keystore` associated for the current context!")
+			.read()
+			.sign_with(id, &pub_key.into(), msg)
 			.map(|sig| ecdsa::Signature::from_slice(sig.as_slice()))
 			.ok()
 	}
@@ -735,11 +715,6 @@ pub trait Hashing {
 		sp_core::hashing::keccak_256(data)
 	}
 
-	/// Conduct a 512-bit Keccak hash.
-	fn keccak_512(data: &[u8]) -> [u8; 64] {
-		sp_core::hashing::keccak_512(data)
-	}
-
 	/// Conduct a 256-bit Sha2 hash.
 	fn sha2_256(data: &[u8]) -> [u8; 32] {
 		sp_core::hashing::sha2_256(data)
@@ -787,7 +762,7 @@ pub trait OffchainIndex {
 
 #[cfg(feature = "std")]
 sp_externalities::decl_extension! {
-	/// Batch verification extension to register/retrieve from the externalities.
+	/// The keystore extension to register/retrieve from the externalities.
 	pub struct VerificationExt(BatchVerifier);
 }
 
@@ -1126,7 +1101,7 @@ mod tracing_setup {
 	};
 	use super::{wasm_tracing, Crossing};
 
-	static TRACING_SET: AtomicBool = AtomicBool::new(false);
+	const TRACING_SET : AtomicBool = AtomicBool::new(false);
 
 
 	/// The PassingTracingSubscriber implements `tracing_core::Subscriber`
@@ -1271,34 +1246,6 @@ pub trait Sandbox {
 	}
 }
 
-/// Wasm host functions for managing tasks.
-///
-/// This should not be used directly. Use `sp_tasks` for running parallel tasks instead.
-#[runtime_interface(wasm_only)]
-pub trait RuntimeTasks {
-	/// Wasm host function for spawning task.
-	///
-	/// This should not be used directly. Use `sp_tasks::spawn` instead.
-	fn spawn(dispatcher_ref: u32, entry: u32, payload: Vec<u8>) -> u64 {
-		sp_externalities::with_externalities(|mut ext|{
-			let runtime_spawn = ext.extension::<RuntimeSpawnExt>()
-				.expect("Cannot spawn without dynamic runtime dispatcher (RuntimeSpawnExt)");
-			runtime_spawn.spawn_call(dispatcher_ref, entry, payload)
-		}).expect("`RuntimeTasks::spawn`: called outside of externalities context")
-	}
-
-	/// Wasm host function for joining a task.
-	///
-	/// This should not be used directly. Use `join` of `sp_tasks::spawn` result instead.
-	fn join(handle: u64) -> Vec<u8> {
-		sp_externalities::with_externalities(|mut ext| {
-			let runtime_spawn = ext.extension::<RuntimeSpawnExt>()
-				.expect("Cannot join without dynamic runtime dispatcher (RuntimeSpawnExt)");
-			runtime_spawn.join(handle)
-		}).expect("`RuntimeTasks::join`: called outside of externalities context")
-	}
- }
-
 /// Allocator used by Substrate when executing the Wasm runtime.
 #[cfg(not(feature = "std"))]
 struct WasmAllocator;
@@ -1366,7 +1313,6 @@ pub type SubstrateHostFunctions = (
 	sandbox::HostFunctions,
 	crate::trie::HostFunctions,
 	offchain_index::HostFunctions,
-	runtime_tasks::HostFunctions,
 );
 
 #[cfg(test)]

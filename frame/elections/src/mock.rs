@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,27 +19,27 @@
 
 #![cfg(test)]
 
+use std::cell::RefCell;
 use frame_support::{
 	StorageValue, StorageMap, parameter_types, assert_ok,
-	traits::{ChangeMembers, Currency, LockIdentifier},
+	traits::{Get, ChangeMembers, Currency, LockIdentifier},
+	weights::Weight,
 };
 use sp_core::H256;
 use sp_runtime::{
-	BuildStorage, testing::Header, traits::{BlakeTwo256, IdentityLookup, Block as BlockT},
+	Perbill, BuildStorage, testing::Header, traits::{BlakeTwo256, IdentityLookup, Block as BlockT},
 };
 use crate as elections;
 
 
 parameter_types! {
 	pub const BlockHashCount: u64 = 250;
-	pub BlockWeights: frame_system::limits::BlockWeights =
-		frame_system::limits::BlockWeights::simple_max(1024);
+	pub const MaximumBlockWeight: Weight = 1024;
+	pub const MaximumBlockLength: u32 = 2 * 1024;
+	pub const AvailableBlockRatio: Perbill = Perbill::one();
 }
-impl frame_system::Config for Test {
+impl frame_system::Trait for Test {
 	type BaseCallFilter = ();
-	type BlockWeights = ();
-	type BlockLength = ();
-	type DbWeight = ();
 	type Origin = Origin;
 	type Call = Call;
 	type Index = u64;
@@ -51,19 +51,25 @@ impl frame_system::Config for Test {
 	type Header = Header;
 	type Event = Event;
 	type BlockHashCount = BlockHashCount;
+	type MaximumBlockWeight = MaximumBlockWeight;
+	type DbWeight = ();
+	type BlockExecutionWeight = ();
+	type ExtrinsicBaseWeight = ();
+	type MaximumExtrinsicWeight = MaximumBlockWeight;
+	type MaximumBlockLength = MaximumBlockLength;
+	type AvailableBlockRatio = AvailableBlockRatio;
 	type Version = ();
 	type PalletInfo = ();
 	type AccountData = pallet_balances::AccountData<u64>;
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
-	type SS58Prefix = ();
 }
 
 parameter_types! {
 	pub const ExistentialDeposit: u64 = 1;
 }
-impl pallet_balances::Config for Test {
+impl pallet_balances::Trait for Test {
 	type MaxLocks = ();
 	type Balance = u64;
 	type DustRemoval = ();
@@ -79,11 +85,34 @@ parameter_types! {
 	pub const InactiveGracePeriod: u32 = 1;
 	pub const VotingPeriod: u64 = 4;
 	pub const MinimumVotingLock: u64 = 5;
-	pub static VotingBond: u64 = 0;
-	pub static VotingFee: u64 = 0;
-	pub static PresentSlashPerVoter: u64 = 0;
-	pub static DecayRatio: u32 = 0;
-	pub static Members: Vec<u64> = vec![];
+}
+
+thread_local! {
+	static VOTER_BOND: RefCell<u64> = RefCell::new(0);
+	static VOTING_FEE: RefCell<u64> = RefCell::new(0);
+	static PRESENT_SLASH_PER_VOTER: RefCell<u64> = RefCell::new(0);
+	static DECAY_RATIO: RefCell<u32> = RefCell::new(0);
+	static MEMBERS: RefCell<Vec<u64>> = RefCell::new(vec![]);
+}
+
+pub struct VotingBond;
+impl Get<u64> for VotingBond {
+	fn get() -> u64 { VOTER_BOND.with(|v| *v.borrow()) }
+}
+
+pub struct VotingFee;
+impl Get<u64> for VotingFee {
+	fn get() -> u64 { VOTING_FEE.with(|v| *v.borrow()) }
+}
+
+pub struct PresentSlashPerVoter;
+impl Get<u64> for PresentSlashPerVoter {
+	fn get() -> u64 { PRESENT_SLASH_PER_VOTER.with(|v| *v.borrow()) }
+}
+
+pub struct DecayRatio;
+impl Get<u32> for DecayRatio {
+	fn get() -> u32 { DECAY_RATIO.with(|v| *v.borrow()) }
 }
 
 pub struct TestChangeMembers;
@@ -105,7 +134,7 @@ parameter_types!{
 	pub const ElectionModuleId: LockIdentifier = *b"py/elect";
 }
 
-impl elections::Config for Test {
+impl elections::Trait for Test {
 	type Event = Event;
 	type Currency = Balances;
 	type BadPresentation = ();
@@ -146,7 +175,7 @@ pub struct ExtBuilder {
 	decay_ratio: u32,
 	desired_seats: u32,
 	voting_fee: u64,
-	voting_bond: u64,
+	voter_bond: u64,
 	bad_presentation_punishment: u64,
 }
 
@@ -157,7 +186,7 @@ impl Default for ExtBuilder {
 			decay_ratio: 24,
 			desired_seats: 2,
 			voting_fee: 0,
-			voting_bond: 0,
+			voter_bond: 0,
 			bad_presentation_punishment: 1,
 		}
 	}
@@ -180,8 +209,8 @@ impl ExtBuilder {
 		self.bad_presentation_punishment = fee;
 		self
 	}
-	pub fn voting_bond(mut self, fee: u64) -> Self {
-		self.voting_bond = fee;
+	pub fn voter_bond(mut self, fee: u64) -> Self {
+		self.voter_bond = fee;
 		self
 	}
 	pub fn desired_seats(mut self, seats: u32) -> Self {
@@ -189,7 +218,7 @@ impl ExtBuilder {
 		self
 	}
 	pub fn build(self) -> sp_io::TestExternalities {
-		VOTING_BOND.with(|v| *v.borrow_mut() = self.voting_bond);
+		VOTER_BOND.with(|v| *v.borrow_mut() = self.voter_bond);
 		VOTING_FEE.with(|v| *v.borrow_mut() = self.voting_fee);
 		PRESENT_SLASH_PER_VOTER.with(|v| *v.borrow_mut() = self.bad_presentation_punishment);
 		DECAY_RATIO.with(|v| *v.borrow_mut() = self.decay_ratio);

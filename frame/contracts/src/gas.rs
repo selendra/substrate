@@ -1,27 +1,25 @@
+// Copyright 2018-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2018-2021 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
+// Substrate is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Substrate is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
 
-use crate::Config;
+// You should have received a copy of the GNU General Public License
+// along with Substrate. If not, see <http://www.gnu.org/licenses/>.
+
+use crate::{Trait, exec::ExecError};
 use sp_std::marker::PhantomData;
 use sp_runtime::traits::Zero;
 use frame_support::dispatch::{
 	DispatchResultWithPostInfo, PostDispatchInfo, DispatchErrorWithPostInfo,
 };
-use pallet_contracts_primitives::ExecError;
 
 #[cfg(test)]
 use std::{any::Any, fmt::Debug};
@@ -32,7 +30,7 @@ pub type Gas = frame_support::weights::Weight;
 #[must_use]
 #[derive(Debug, PartialEq, Eq)]
 pub enum GasMeterResult {
-	Proceed(ChargedAmount),
+	Proceed,
 	OutOfGas,
 }
 
@@ -40,17 +38,8 @@ impl GasMeterResult {
 	pub fn is_out_of_gas(&self) -> bool {
 		match *self {
 			GasMeterResult::OutOfGas => true,
-			GasMeterResult::Proceed(_) => false,
+			GasMeterResult::Proceed => false,
 		}
-	}
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ChargedAmount(Gas);
-
-impl ChargedAmount {
-	pub fn amount(&self) -> Gas {
-		self.0
 	}
 }
 
@@ -70,7 +59,7 @@ impl<T: Any + Debug + PartialEq + Eq> TestAuxiliaries for T {}
 /// Implementing type is expected to be super lightweight hence `Copy` (`Clone` is added
 /// for consistency). If inlined there should be no observable difference compared
 /// to a hand-written code.
-pub trait Token<T: Config>: Copy + Clone + TestAuxiliaries {
+pub trait Token<T: Trait>: Copy + Clone + TestAuxiliaries {
 	/// Metadata type, which the token can require for calculating the amount
 	/// of gas to charge. Can be a some configuration type or
 	/// just the `()`.
@@ -94,7 +83,7 @@ pub struct ErasedToken {
 	pub token: Box<dyn Any>,
 }
 
-pub struct GasMeter<T: Config> {
+pub struct GasMeter<T: Trait> {
 	gas_limit: Gas,
 	/// Amount of gas left from initial gas limit. Can reach zero.
 	gas_left: Gas,
@@ -102,7 +91,7 @@ pub struct GasMeter<T: Config> {
 	#[cfg(test)]
 	tokens: Vec<ErasedToken>,
 }
-impl<T: Config> GasMeter<T> {
+impl<T: Trait> GasMeter<T> {
 	pub fn new(gas_limit: Gas) -> Self {
 		GasMeter {
 			gas_limit,
@@ -148,18 +137,17 @@ impl<T: Config> GasMeter<T> {
 		self.gas_left = new_value.unwrap_or_else(Zero::zero);
 
 		match new_value {
-			Some(_) => GasMeterResult::Proceed(ChargedAmount(amount)),
+			Some(_) => GasMeterResult::Proceed,
 			None => GasMeterResult::OutOfGas,
 		}
 	}
 
-	/// Refund previously charged gas back to the gas meter.
-	///
-	/// This can be used if a gas worst case estimation must be charged before
-	/// performing a certain action. This way the difference can be refundend when
-	/// the worst case did not happen.
-	pub fn refund(&mut self, amount: ChargedAmount) {
-		self.gas_left = self.gas_left.saturating_add(amount.0).min(self.gas_limit)
+	// Account for not fully used gas.
+	//
+	// This can be used after dispatching a runtime call to refund gas that was not
+	// used by the dispatchable.
+	pub fn refund(&mut self, gas: Gas) {
+		self.gas_left = self.gas_left.saturating_add(gas).max(self.gas_limit);
 	}
 
 	/// Allocate some amount of gas and perform some work with

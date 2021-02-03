@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2017-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2017-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,27 +20,37 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-mod mock;
-mod tests;
-mod benchmarking;
-pub mod weights;
-
 use sp_std::prelude::*;
 use codec::Codec;
-use sp_runtime::MultiAddress;
 use sp_runtime::traits::{
 	StaticLookup, Member, LookupError, Zero, Saturating, AtLeast32Bit
 };
 use frame_support::{Parameter, decl_module, decl_error, decl_event, decl_storage, ensure};
 use frame_support::dispatch::DispatchResult;
 use frame_support::traits::{Currency, ReservableCurrency, Get, BalanceStatus::Reserved};
+use frame_support::weights::Weight;
 use frame_system::{ensure_signed, ensure_root};
-pub use weights::WeightInfo;
+use self::address::Address as RawAddress;
 
-type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+mod mock;
+pub mod address;
+mod tests;
+mod benchmarking;
+mod default_weights;
+
+pub type Address<T> = RawAddress<<T as frame_system::Trait>::AccountId, <T as Trait>::AccountIndex>;
+type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+
+pub trait WeightInfo {
+	fn claim() -> Weight;
+	fn transfer() -> Weight;
+	fn free() -> Weight;
+	fn force_transfer() -> Weight;
+	fn freeze() -> Weight;
+}
 
 /// The module's config trait.
-pub trait Config: frame_system::Config {
+pub trait Trait: frame_system::Trait {
 	/// Type used for storing an account's index; implies the maximum number of accounts the system
 	/// can hold.
 	type AccountIndex: Parameter + Member + Codec + Default + AtLeast32Bit + Copy;
@@ -52,14 +62,14 @@ pub trait Config: frame_system::Config {
 	type Deposit: Get<BalanceOf<Self>>;
 
 	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// Weight information for extrinsics in this pallet.
 	type WeightInfo: WeightInfo;
 }
 
 decl_storage! {
-	trait Store for Module<T: Config> as Indices {
+	trait Store for Module<T: Trait> as Indices {
 		/// The lookup from index to account.
 		pub Accounts build(|config: &GenesisConfig<T>|
 			config.indices.iter()
@@ -75,20 +85,20 @@ decl_storage! {
 
 decl_event!(
 	pub enum Event<T> where
-		<T as frame_system::Config>::AccountId,
-		<T as Config>::AccountIndex
+		<T as frame_system::Trait>::AccountId,
+		<T as Trait>::AccountIndex
 	{
-		/// A account index was assigned. \[index, who\]
+		/// A account index was assigned. \[who, index\]
 		IndexAssigned(AccountId, AccountIndex),
 		/// A account index has been freed up (unassigned). \[index\]
 		IndexFreed(AccountIndex),
-		/// A account index has been frozen to its current account ID. \[index, who\]
+		/// A account index has been frozen to its current account ID. \[who, index\]
 		IndexFrozen(AccountIndex, AccountId),
 	}
 );
 
 decl_error! {
-	pub enum Error for Module<T: Config> {
+	pub enum Error for Module<T: Trait> {
 		/// The index was not already assigned.
 		NotAssigned,
 		/// The index is assigned to another account.
@@ -103,7 +113,7 @@ decl_error! {
 }
 
 decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin, system = frame_system {
+	pub struct Module<T: Trait> for enum Call where origin: T::Origin, system = frame_system {
 		/// The deposit needed for reserving an index.
 		const Deposit: BalanceOf<T> = T::Deposit::get();
 
@@ -275,7 +285,7 @@ decl_module! {
 	}
 }
 
-impl<T: Config> Module<T> {
+impl<T: Trait> Module<T> {
 	// PUBLIC IMMUTABLES
 
 	/// Lookup an T::AccountIndex to get an Id, if there's one there.
@@ -285,18 +295,17 @@ impl<T: Config> Module<T> {
 
 	/// Lookup an address to get an Id, if there's one there.
 	pub fn lookup_address(
-		a: MultiAddress<T::AccountId, T::AccountIndex>
+		a: address::Address<T::AccountId, T::AccountIndex>
 	) -> Option<T::AccountId> {
 		match a {
-			MultiAddress::Id(i) => Some(i),
-			MultiAddress::Index(i) => Self::lookup_index(i),
-			_ => None,
+			address::Address::Id(i) => Some(i),
+			address::Address::Index(i) => Self::lookup_index(i),
 		}
 	}
 }
 
-impl<T: Config> StaticLookup for Module<T> {
-	type Source = MultiAddress<T::AccountId, T::AccountIndex>;
+impl<T: Trait> StaticLookup for Module<T> {
+	type Source = address::Address<T::AccountId, T::AccountIndex>;
 	type Target = T::AccountId;
 
 	fn lookup(a: Self::Source) -> Result<Self::Target, LookupError> {
@@ -304,6 +313,6 @@ impl<T: Config> StaticLookup for Module<T> {
 	}
 
 	fn unlookup(a: Self::Target) -> Self::Source {
-		MultiAddress::Id(a)
+		address::Address::Id(a)
 	}
 }

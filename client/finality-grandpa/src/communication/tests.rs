@@ -1,20 +1,18 @@
+// Copyright 2019-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-
-// This program is free software: you can redistribute it and/or modify
+// Substrate is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
+// Substrate is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
 // You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Tests for the communication portion of the GRANDPA crate.
 
@@ -26,11 +24,10 @@ use sc_network_gossip::Validator;
 use std::sync::Arc;
 use sp_keyring::Ed25519Keyring;
 use parity_scale_codec::Encode;
-use sp_runtime::traits::NumberFor;
+use sp_runtime::{ConsensusEngineId, traits::NumberFor};
 use std::{borrow::Cow, pin::Pin, task::{Context, Poll}};
-use crate::communication::GRANDPA_PROTOCOL_NAME;
 use crate::environment::SharedVoterSetState;
-use sp_finality_grandpa::AuthorityList;
+use sp_finality_grandpa::{AuthorityList, GRANDPA_ENGINE_ID};
 use super::gossip::{self, GossipValidator};
 use super::{VoterSet, Round, SetId};
 
@@ -60,9 +57,11 @@ impl sc_network_gossip::Network<Block> for TestNetwork {
 
 	fn disconnect_peer(&self, _: PeerId) {}
 
-	fn write_notification(&self, who: PeerId, _: Cow<'static, str>, message: Vec<u8>) {
+	fn write_notification(&self, who: PeerId, _: ConsensusEngineId, message: Vec<u8>) {
 		let _ = self.sender.unbounded_send(Event::WriteNotification(who, message));
 	}
+
+	fn register_notifications_protocol(&self, _: ConsensusEngineId, _: Cow<'static, str>) {}
 
 	fn announce(&self, block: Hash, _associated_data: Vec<u8>) {
 		let _ = self.sender.unbounded_send(Event::Announce(block));
@@ -87,7 +86,7 @@ impl sc_network_gossip::ValidatorContext<Block> for TestNetwork {
 		<Self as sc_network_gossip::Network<Block>>::write_notification(
 			self,
 			who.clone(),
-			GRANDPA_PROTOCOL_NAME.into(),
+			GRANDPA_ENGINE_ID,
 			data,
 		);
 	}
@@ -288,20 +287,20 @@ fn good_commit_leads_to_relay() {
 					// Add the sending peer and send the commit
 					let _ = sender.unbounded_send(NetworkEvent::NotificationStreamOpened {
 						remote: sender_id.clone(),
-						protocol: GRANDPA_PROTOCOL_NAME.into(),
+						engine_id: GRANDPA_ENGINE_ID,
 						role: ObservedRole::Full,
 					});
 
 					let _ = sender.unbounded_send(NetworkEvent::NotificationsReceived {
 						remote: sender_id.clone(),
-						messages: vec![(GRANDPA_PROTOCOL_NAME.into(), commit_to_send.clone().into())],
+						messages: vec![(GRANDPA_ENGINE_ID, commit_to_send.clone().into())],
 					});
 
 					// Add a random peer which will be the recipient of this message
 					let receiver_id = sc_network::PeerId::random();
 					let _ = sender.unbounded_send(NetworkEvent::NotificationStreamOpened {
 						remote: receiver_id.clone(),
-						protocol: GRANDPA_PROTOCOL_NAME.into(),
+						engine_id: GRANDPA_ENGINE_ID,
 						role: ObservedRole::Full,
 					});
 
@@ -320,7 +319,7 @@ fn good_commit_leads_to_relay() {
 
 						sender.unbounded_send(NetworkEvent::NotificationsReceived {
 							remote: receiver_id,
-							messages: vec![(GRANDPA_PROTOCOL_NAME.into(), msg.encode().into())],
+							messages: vec![(GRANDPA_ENGINE_ID, msg.encode().into())],
 						})
 					};
 
@@ -435,12 +434,12 @@ fn bad_commit_leads_to_report() {
 				Event::EventStream(sender) => {
 					let _ = sender.unbounded_send(NetworkEvent::NotificationStreamOpened {
 						remote: sender_id.clone(),
-						protocol: GRANDPA_PROTOCOL_NAME.into(),
+						engine_id: GRANDPA_ENGINE_ID,
 						role: ObservedRole::Full,
 					});
 					let _ = sender.unbounded_send(NetworkEvent::NotificationsReceived {
 						remote: sender_id.clone(),
-						messages: vec![(GRANDPA_PROTOCOL_NAME.into(), commit_to_send.clone().into())],
+						messages: vec![(GRANDPA_ENGINE_ID, commit_to_send.clone().into())],
 					});
 
 					true

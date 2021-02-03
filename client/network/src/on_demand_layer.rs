@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2017-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2017-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 // This program is free software: you can redistribute it and/or modify
@@ -51,17 +51,6 @@ pub struct OnDemand<B: BlockT> {
 	requests_send: TracingUnboundedSender<light_client_handler::Request<B>>,
 }
 
-
-#[derive(Debug, thiserror::Error)]
-#[error("AlwaysBadChecker")]
-struct ErrorAlwaysBadChecker;
-
-impl Into<ClientError> for ErrorAlwaysBadChecker {
-	fn into(self) -> ClientError {
-		ClientError::Application(Box::new(self))
-	}
-}
-
 /// Dummy implementation of `FetchChecker` that always assumes that responses are bad.
 ///
 /// Considering that it is the responsibility of the client to build the fetcher, it can use this
@@ -76,7 +65,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 		_remote_header: Option<Block::Header>,
 		_remote_proof: StorageProof,
 	) -> Result<Block::Header, ClientError> {
-		Err(ErrorAlwaysBadChecker.into())
+		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
 
 	fn check_read_proof(
@@ -84,7 +73,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 		_request: &RemoteReadRequest<Block::Header>,
 		_remote_proof: StorageProof,
 	) -> Result<HashMap<Vec<u8>,Option<Vec<u8>>>, ClientError> {
-		Err(ErrorAlwaysBadChecker.into())
+		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
 
 	fn check_read_child_proof(
@@ -92,7 +81,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 		_request: &RemoteReadChildRequest<Block::Header>,
 		_remote_proof: StorageProof,
 	) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ClientError> {
-		Err(ErrorAlwaysBadChecker.into())
+		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
 
 	fn check_execution_proof(
@@ -100,7 +89,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 		_request: &RemoteCallRequest<Block::Header>,
 		_remote_proof: StorageProof,
 	) -> Result<Vec<u8>, ClientError> {
-		Err(ErrorAlwaysBadChecker.into())
+		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
 
 	fn check_changes_proof(
@@ -108,7 +97,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 		_request: &RemoteChangesRequest<Block::Header>,
 		_remote_proof: ChangesProof<Block::Header>
 	) -> Result<Vec<(NumberFor<Block>, u32)>, ClientError> {
-		Err(ErrorAlwaysBadChecker.into())
+		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
 
 	fn check_body_proof(
@@ -116,7 +105,7 @@ impl<Block: BlockT> FetchChecker<Block> for AlwaysBadChecker {
 		_request: &RemoteBodyRequest<Block::Header>,
 		_body: Vec<Block::Extrinsic>
 	) -> Result<Vec<Block::Extrinsic>, ClientError> {
-		Err(ErrorAlwaysBadChecker.into())
+		Err(ClientError::Msg("AlwaysBadChecker".into()))
 	}
 }
 

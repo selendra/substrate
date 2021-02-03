@@ -1,20 +1,18 @@
+// Copyright 2019-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-
-// This program is free software: you can redistribute it and/or modify
+// Substrate is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
+// Substrate is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
 // You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 use libp2p::core::multiaddr::{Multiaddr, Protocol};
 use rand::seq::SliceRandom;
@@ -141,7 +139,7 @@ fn peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
 mod tests {
 	use super::*;
 
-	use libp2p::multihash::{self, Multihash};
+	use libp2p::multihash;
 	use quickcheck::{Arbitrary, Gen, QuickCheck, TestResult};
 	use rand::Rng;
 
@@ -165,7 +163,7 @@ mod tests {
 		fn arbitrary<G: Gen>(g: &mut G) -> Self {
 			let seed: [u8; 32] = g.gen();
 			let peer_id = PeerId::from_multihash(
-				Multihash::wrap(multihash::Code::Sha2_256.into(), &seed).unwrap()
+				multihash::wrap(multihash::Code::Sha2_256, &seed)
 			).unwrap();
 			let multiaddr = "/ip6/2001:db8:0:0:0:0:0:2/tcp/30333".parse::<Multiaddr>()
 				.unwrap()

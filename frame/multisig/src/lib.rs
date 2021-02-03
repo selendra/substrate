@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +18,7 @@
 //! # Multisig Module
 //! A module for doing multisig dispatch.
 //!
-//! - [`multisig::Config`](./trait.Config.html)
+//! - [`multisig::Trait`](./trait.Trait.html)
 //! - [`Call`](./enum.Call.html)
 //!
 //! ## Overview
@@ -41,14 +41,10 @@
 //! * `cancel_as_multi` - Cancel a call from a composite origin.
 //!
 //! [`Call`]: ./enum.Call.html
-//! [`Config`]: ./trait.Config.html
+//! [`Trait`]: ./trait.Trait.html
 
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
-
-mod tests;
-mod benchmarking;
-pub mod weights;
 
 use sp_std::prelude::*;
 use codec::{Encode, Decode};
@@ -60,16 +56,32 @@ use frame_support::{traits::{Get, ReservableCurrency, Currency},
 };
 use frame_system::{self as system, ensure_signed, RawOrigin};
 use sp_runtime::{DispatchError, DispatchResult, traits::{Dispatchable, Zero}};
-pub use weights::WeightInfo;
 
-type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+mod tests;
+mod benchmarking;
+mod default_weights;
+
+type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
 /// Just a bunch of bytes, but they should decode to a valid `Call`.
 pub type OpaqueCall = Vec<u8>;
 
+pub trait WeightInfo {
+	fn as_multi_threshold_1(z: u32, ) -> Weight;
+	fn as_multi_create(s: u32, z: u32, ) -> Weight;
+	fn as_multi_create_store(s: u32, z: u32, ) -> Weight;
+	fn as_multi_approve(s: u32, z: u32, ) -> Weight;
+	fn as_multi_approve_store(s: u32, z: u32, ) -> Weight;
+	fn as_multi_complete(s: u32, z: u32, ) -> Weight;
+	fn approve_as_multi_create(s: u32, ) -> Weight;
+	fn approve_as_multi_approve(s: u32, ) -> Weight;
+	fn approve_as_multi_complete(s: u32, ) -> Weight;
+	fn cancel_as_multi(s: u32, ) -> Weight;
+}
+
 /// Configuration trait.
-pub trait Config: frame_system::Config {
+pub trait Trait: frame_system::Trait {
 	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// The overarching call type.
 	type Call: Parameter + Dispatchable<Origin=Self::Origin, PostInfo=PostDispatchInfo>
@@ -123,7 +135,7 @@ pub struct Multisig<BlockNumber, Balance, AccountId> {
 }
 
 decl_storage! {
-	trait Store for Module<T: Config> as Multisig {
+	trait Store for Module<T: Trait> as Multisig {
 		/// The set of open multisig operations.
 		pub Multisigs: double_map
 			hasher(twox_64_concat) T::AccountId, hasher(blake2_128_concat) [u8; 32]
@@ -134,7 +146,7 @@ decl_storage! {
 }
 
 decl_error! {
-	pub enum Error for Module<T: Config> {
+	pub enum Error for Module<T: Trait> {
 		/// Threshold must be 2 or greater.
 		MinimumThreshold,
 		/// Call is already approved by this signatory.
@@ -169,8 +181,8 @@ decl_error! {
 decl_event! {
 	/// Events type.
 	pub enum Event<T> where
-		AccountId = <T as system::Config>::AccountId,
-		BlockNumber = <T as system::Config>::BlockNumber,
+		AccountId = <T as system::Trait>::AccountId,
+		BlockNumber = <T as system::Trait>::BlockNumber,
 		CallHash = [u8; 32]
 	{
 		/// A new multisig operation has begun. \[approving, multisig, call_hash\]
@@ -191,7 +203,7 @@ enum CallOrHash {
 }
 
 decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		type Error = Error<T>;
 
 		/// Deposit one of this module's events by using the default implementation.
@@ -225,14 +237,13 @@ decl_module! {
 		/// # </weight>
 		#[weight = (
 			T::WeightInfo::as_multi_threshold_1(call.using_encoded(|c| c.len() as u32))
-				.saturating_add(call.get_dispatch_info().weight)
-				 // AccountData for inner call origin accountdata.
-				.saturating_add(T::DbWeight::get().reads_writes(1, 1)),
+				.saturating_add(call.get_dispatch_info().weight
+			),
 			call.get_dispatch_info().class,
 		)]
 		fn as_multi_threshold_1(origin,
 			other_signatories: Vec<T::AccountId>,
-			call: Box<<T as Config>::Call>,
+			call: Box<<T as Trait>::Call>,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let max_sigs = T::MaxSignatories::get() as usize;
@@ -443,7 +454,7 @@ decl_module! {
 	}
 }
 
-impl<T: Config> Module<T> {
+impl<T: Trait> Module<T> {
 	/// Derive a multi-account ID from the sorted list of accounts and the threshold that are
 	/// required.
 	///
@@ -615,7 +626,7 @@ impl<T: Config> Module<T> {
 	}
 
 	/// Attempt to decode and return the call, provided by the user or from storage.
-	fn get_call(hash: &[u8; 32], maybe_known: Option<&[u8]>) -> Option<(<T as Config>::Call, usize)> {
+	fn get_call(hash: &[u8; 32], maybe_known: Option<&[u8]>) -> Option<(<T as Trait>::Call, usize)> {
 		maybe_known.map_or_else(|| {
 			Calls::<T>::get(hash).and_then(|(data, ..)| {
 				Decode::decode(&mut &data[..]).ok().map(|d| (d, data.len()))

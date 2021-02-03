@@ -1,20 +1,18 @@
+// Copyright 2019-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-
-// This program is free software: you can redistribute it and/or modify
+// Substrate is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
+// Substrate is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
 // You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Traits and accessor functions for calling into the Substrate Wasm runtime.
 //!
@@ -55,7 +53,7 @@ struct VersionedRuntime {
 	/// Wasm runtime type.
 	wasm_method: WasmExecutionMethod,
 	/// Shared runtime that can spawn instances.
-	module: Arc<dyn WasmModule>,
+	module: Box<dyn WasmModule>,
 	/// The number of WebAssembly heap pages this instance was created with.
 	heap_pages: u64,
 	/// Runtime version according to `Core_version` if any.
@@ -72,7 +70,6 @@ impl VersionedRuntime {
 		f: F,
 	) -> Result<R, Error>
 		where F: FnOnce(
-			&Arc<dyn WasmModule>,
 			&dyn WasmInstance,
 			Option<&RuntimeVersion>,
 			&mut dyn Externalities)
@@ -90,7 +87,7 @@ impl VersionedRuntime {
 					.map(|r| Ok((r, false)))
 					.unwrap_or_else(|| self.module.new_instance().map(|i| (i, true)))?;
 
-				let result = f(&self.module, &*instance, self.version.as_ref(), ext);
+				let result = f(&*instance, self.version.as_ref(), ext);
 				if let Err(e) = &result {
 					if new_inst {
 						log::warn!(
@@ -126,7 +123,7 @@ impl VersionedRuntime {
 				// Allocate a new instance
 				let instance = self.module.new_instance()?;
 
-				f(&self.module, &*instance, self.version.as_ref(), ext)
+				f(&*instance, self.version.as_ref(), ext)
 			}
 		}
 	}
@@ -202,7 +199,6 @@ impl RuntimeCache {
 		f: F,
 	) -> Result<Result<R, Error>, Error>
 		where F: FnOnce(
-			&Arc<dyn WasmModule>,
 			&dyn WasmInstance,
 			Option<&RuntimeVersion>,
 			&mut dyn Externalities)
@@ -271,7 +267,7 @@ pub fn create_wasm_runtime_with_code(
 	code: &[u8],
 	host_functions: Vec<&'static dyn Function>,
 	allow_missing_func_imports: bool,
-) -> Result<Arc<dyn WasmModule>, WasmError> {
+) -> Result<Box<dyn WasmModule>, WasmError> {
 	match wasm_method {
 		WasmExecutionMethod::Interpreted =>
 			sc_executor_wasmi::create_runtime(
@@ -279,7 +275,7 @@ pub fn create_wasm_runtime_with_code(
 				heap_pages,
 				host_functions,
 				allow_missing_func_imports
-			).map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
+			).map(|runtime| -> Box<dyn WasmModule> { Box::new(runtime) }),
 		#[cfg(feature = "wasmtime")]
 		WasmExecutionMethod::Compiled =>
 			sc_executor_wasmtime::create_runtime(
@@ -287,7 +283,7 @@ pub fn create_wasm_runtime_with_code(
 				heap_pages,
 				host_functions,
 				allow_missing_func_imports
-			).map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
+			).map(|runtime| -> Box<dyn WasmModule> { Box::new(runtime) }),
 	}
 }
 
@@ -322,7 +318,7 @@ fn create_versioned_wasm_runtime(
 ) -> Result<VersionedRuntime, WasmError> {
 	#[cfg(not(target_os = "unknown"))]
 	let time = std::time::Instant::now();
-	let runtime = create_wasm_runtime_with_code(
+	let mut runtime = create_wasm_runtime_with_code(
 		wasm_method,
 		heap_pages,
 		&code,
@@ -337,10 +333,10 @@ fn create_versioned_wasm_runtime(
 
 		// The following unwind safety assertion is OK because if the method call panics, the
 		// runtime will be dropped.
-		let runtime = AssertUnwindSafe(runtime.as_ref());
+		let runtime = AssertUnwindSafe(runtime.as_mut());
 		crate::native_executor::with_externalities_safe(
 			&mut **ext,
-			move || runtime.new_instance()?.call("Core_version".into(), &[])
+			move || runtime.new_instance()?.call("Core_version", &[])
 		).map_err(|_| WasmError::Instantiation("panic in call to get runtime version".into()))?
 	};
 	let version = match version_result {

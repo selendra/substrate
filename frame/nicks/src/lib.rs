@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +17,7 @@
 
 //! # Nicks Module
 //!
-//! - [`nicks::Config`](./trait.Config.html)
+//! - [`nicks::Trait`](./trait.Trait.html)
 //! - [`Call`](./enum.Call.html)
 //!
 //! ## Overview
@@ -37,7 +37,7 @@
 //! * `kill_name` - Forcibly remove the associated name; the deposit is lost.
 //!
 //! [`Call`]: ./enum.Call.html
-//! [`Config`]: ./trait.Config.html
+//! [`Trait`]: ./trait.Trait.html
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -51,12 +51,12 @@ use frame_support::{
 };
 use frame_system::ensure_signed;
 
-type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
+type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+type NegativeImbalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::NegativeImbalance;
 
-pub trait Config: frame_system::Config {
+pub trait Trait: frame_system::Trait {
 	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// The currency trait.
 	type Currency: ReservableCurrency<Self::AccountId>;
@@ -78,14 +78,14 @@ pub trait Config: frame_system::Config {
 }
 
 decl_storage! {
-	trait Store for Module<T: Config> as Nicks {
+	trait Store for Module<T: Trait> as Nicks {
 		/// The lookup table for names.
 		NameOf: map hasher(twox_64_concat) T::AccountId => Option<(Vec<u8>, BalanceOf<T>)>;
 	}
 }
 
 decl_event!(
-	pub enum Event<T> where AccountId = <T as frame_system::Config>::AccountId, Balance = BalanceOf<T> {
+	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId, Balance = BalanceOf<T> {
 		/// A name was set. \[who\]
 		NameSet(AccountId),
 		/// A name was forcibly set. \[target\]
@@ -101,7 +101,7 @@ decl_event!(
 
 decl_error! {
 	/// Error for the nicks module.
-	pub enum Error for Module<T: Config> {
+	pub enum Error for Module<T: Trait> {
 		/// A name is too short.
 		TooShort,
 		/// A name is too long.
@@ -113,7 +113,7 @@ decl_error! {
 
 decl_module! {
 	/// Nicks module declaration.
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		type Error = Error<T>;
 
 		fn deposit_event() = default;
@@ -241,13 +241,13 @@ mod tests {
 	use super::*;
 
 	use frame_support::{
-		assert_ok, assert_noop, impl_outer_origin, parameter_types,
+		assert_ok, assert_noop, impl_outer_origin, parameter_types, weights::Weight,
 		ord_parameter_types
 	};
 	use sp_core::H256;
 	use frame_system::EnsureSignedBy;
 	use sp_runtime::{
-		testing::Header, traits::{BlakeTwo256, IdentityLookup, BadOrigin},
+		Perbill, testing::Header, traits::{BlakeTwo256, IdentityLookup, BadOrigin},
 	};
 
 	impl_outer_origin! {
@@ -258,14 +258,12 @@ mod tests {
 	pub struct Test;
 	parameter_types! {
 		pub const BlockHashCount: u64 = 250;
-		pub BlockWeights: frame_system::limits::BlockWeights =
-			frame_system::limits::BlockWeights::simple_max(1024);
+		pub const MaximumBlockWeight: Weight = 1024;
+		pub const MaximumBlockLength: u32 = 2 * 1024;
+		pub const AvailableBlockRatio: Perbill = Perbill::one();
 	}
-	impl frame_system::Config for Test {
+	impl frame_system::Trait for Test {
 		type BaseCallFilter = ();
-		type BlockWeights = ();
-		type BlockLength = ();
-		type DbWeight = ();
 		type Origin = Origin;
 		type Index = u64;
 		type BlockNumber = u64;
@@ -277,18 +275,24 @@ mod tests {
 		type Header = Header;
 		type Event = ();
 		type BlockHashCount = BlockHashCount;
+		type MaximumBlockWeight = MaximumBlockWeight;
+		type DbWeight = ();
+		type BlockExecutionWeight = ();
+		type ExtrinsicBaseWeight = ();
+		type MaximumExtrinsicWeight = MaximumBlockWeight;
+		type MaximumBlockLength = MaximumBlockLength;
+		type AvailableBlockRatio = AvailableBlockRatio;
 		type Version = ();
 		type PalletInfo = ();
 		type AccountData = pallet_balances::AccountData<u64>;
 		type OnNewAccount = ();
 		type OnKilledAccount = ();
 		type SystemWeightInfo = ();
-		type SS58Prefix = ();
 	}
 	parameter_types! {
 		pub const ExistentialDeposit: u64 = 1;
 	}
-	impl pallet_balances::Config for Test {
+	impl pallet_balances::Trait for Test {
 		type MaxLocks = ();
 		type Balance = u64;
 		type Event = ();
@@ -305,7 +309,7 @@ mod tests {
 	ord_parameter_types! {
 		pub const One: u64 = 1;
 	}
-	impl Config for Test {
+	impl Trait for Test {
 		type Event = ();
 		type Currency = Balances;
 		type ReservationFee = ReservationFee;

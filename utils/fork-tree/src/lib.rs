@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -144,7 +144,7 @@ impl<H, N, V> ForkTree<H, N, V> where
 			for child in root_children {
 				if is_first &&
 					(child.number == *number && child.hash == *hash ||
-					 child.number < *number && is_descendent_of(&child.hash, hash)?)
+					 child.number < *number && is_descendent_of(&child.hash, hash).unwrap_or(false))
 				{
 					root.children.push(child);
 					// assuming that the tree is well formed only one child should pass this requirement
@@ -229,10 +229,7 @@ impl<H, N, V> ForkTree<H, N, V> where
 					number = n;
 					data = d;
 				},
-				None => {
-					self.rebalance();
-					return Ok(false);
-				},
+				None => return Ok(false),
 			}
 		}
 
@@ -254,9 +251,7 @@ impl<H, N, V> ForkTree<H, N, V> where
 	}
 
 	fn node_iter(&self) -> impl Iterator<Item=&Node<H, N, V>> {
-		// we need to reverse the order of roots to maintain the expected
-		// ordering since the iterator uses a stack to track state.
-		ForkTreeIterator { stack: self.roots.iter().rev().collect() }
+		ForkTreeIterator { stack: self.roots.iter().collect() }
 	}
 
 	/// Iterates the nodes in the tree in pre-order.
@@ -415,15 +410,15 @@ impl<H, N, V> ForkTree<H, N, V> where
 		// another fork not part of the tree). make sure to only keep roots that
 		// are part of the finalized branch
 		let mut changed = false;
-		let roots = std::mem::take(&mut self.roots);
+		self.roots.retain(|root| {
+			let retain = root.number > number && is_descendent_of(hash, &root.hash).unwrap_or(false);
 
-		for root in roots {
-			if root.number > number && is_descendent_of(hash, &root.hash)? {
-				self.roots.push(root);
-			} else {
+			if !retain {
 				changed = true;
 			}
-		}
+
+			retain
+		});
 
 		self.best_finalized_number = Some(number);
 
@@ -467,19 +462,16 @@ impl<H, N, V> ForkTree<H, N, V> where
 			let (is_finalized, is_descendant, is_ancestor) = {
 				let root = &self.roots[idx];
 				let is_finalized = root.hash == *hash;
-				let is_descendant =
-					!is_finalized && root.number > number && is_descendent_of(hash, &root.hash)?;
-				let is_ancestor = !is_finalized
-					&& !is_descendant && root.number < number
-					&& is_descendent_of(&root.hash, hash)?;
+				let is_descendant = !is_finalized
+					&& root.number > number && is_descendent_of(hash, &root.hash).unwrap_or(false);
+				let is_ancestor = !is_finalized && !is_descendant
+					&& root.number < number && is_descendent_of(&root.hash, hash).unwrap_or(false);
 				(is_finalized, is_descendant, is_ancestor)
 			};
 
 			// if we have met finalized root - open it and return
 			if is_finalized {
-				return Ok(FinalizationResult::Changed(Some(
-					self.finalize_root_at(idx),
-				)));
+				return Ok(FinalizationResult::Changed(Some(self.finalize_root_at(idx))));
 			}
 
 			// if node is descendant of finalized block - just leave it as is
@@ -613,19 +605,18 @@ impl<H, N, V> ForkTree<H, N, V> where
 		// descendent (in this case the node wasn't finalized earlier presumably
 		// because the predicate didn't pass).
 		let mut changed = false;
-		let roots = std::mem::take(&mut self.roots);
+		self.roots.retain(|root| {
+			let retain =
+				root.number > number && is_descendent_of(hash, &root.hash).unwrap_or(false) ||
+				root.number == number && root.hash == *hash ||
+				is_descendent_of(&root.hash, hash).unwrap_or(false);
 
-		for root in roots {
-			let retain = root.number > number && is_descendent_of(hash, &root.hash)?
-				|| root.number == number && root.hash == *hash
-				|| is_descendent_of(&root.hash, hash)?;
-
-			if retain {
-				self.roots.push(root);
-			} else {
+			if !retain {
 				changed = true;
 			}
-		}
+
+			retain
+		});
 
 		self.best_finalized_number = Some(number);
 
@@ -907,7 +898,8 @@ impl<H, N, V> Iterator for RemovedIterator<H, N, V> {
 			// child nodes are stored ordered by max branch height (decreasing),
 			// we want to keep this ordering while iterating but since we're
 			// using a stack for iterator state we need to reverse it.
-			let children = std::mem::take(&mut node.children);
+			let mut children = Vec::new();
+			std::mem::swap(&mut children, &mut node.children);
 
 			self.stack.extend(children.into_iter().rev());
 			(node.hash, node.number, node.data)
@@ -947,10 +939,6 @@ mod test {
 		//   — J - K
 		//
 		// (where N is not a part of fork tree)
-		//
-		// NOTE: the tree will get automatically rebalance on import and won't be laid out like the
-		// diagram above. the children will be ordered by subtree depth and the longest branches
-		// will be on the leftmost side of the tree.
 		let is_descendent_of = |base: &&str, block: &&str| -> Result<bool, TestError> {
 			let letters = vec!["B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "O"];
 			match (*base, *block) {
@@ -1144,7 +1132,7 @@ mod test {
 
 		assert_eq!(
 			tree.roots().map(|(h, n, _)| (h.clone(), n.clone())).collect::<Vec<_>>(),
-			vec![("L", 4), ("I", 4)],
+			vec![("I", 4), ("L", 4)],
 		);
 
 		// finalizing a node from another fork that isn't part of the tree clears the tree
@@ -1192,7 +1180,7 @@ mod test {
 
 		assert_eq!(
 			tree.roots().map(|(h, n, _)| (h.clone(), n.clone())).collect::<Vec<_>>(),
-			vec![("L", 4), ("I", 4)],
+			vec![("I", 4), ("L", 4)],
 		);
 
 		assert_eq!(
@@ -1224,7 +1212,7 @@ mod test {
 	#[test]
 	fn finalize_with_descendent_works() {
 		#[derive(Debug, PartialEq)]
-		struct Change { effective: u64 }
+		struct Change { effective: u64 };
 
 		let (mut tree, is_descendent_of) = {
 			let mut tree = ForkTree::new();
@@ -1366,11 +1354,11 @@ mod test {
 			vec![
 				("A", 1),
 				("B", 2), ("C", 3), ("D", 4), ("E", 5),
-				("F", 2), ("H", 3), ("L", 4), ("M", 5),
-				("O", 5),
-				("I", 4),
+				("F", 2),
 				("G", 3),
-				("J", 2), ("K", 3),
+				("H", 3), ("I", 4),
+				("L", 4), ("M", 5), ("O", 5),
+				("J", 2), ("K", 3)
 			],
 		);
 	}
@@ -1492,7 +1480,7 @@ mod test {
 
 		assert_eq!(
 			removed.map(|(hash, _, _)| hash).collect::<Vec<_>>(),
-			vec!["A", "F", "H", "L", "M", "O", "I", "G", "J", "K"]
+			vec!["A", "F", "G", "H", "I", "L", "M", "O", "J", "K"]
 		);
 
 		let removed = tree.prune(
@@ -1557,30 +1545,19 @@ mod test {
 	fn tree_rebalance() {
 		let (mut tree, _) = test_fork_tree();
 
-		// the tree is automatically rebalanced on import, therefore we should iterate in preorder
-		// exploring the longest forks first. check the ascii art above to understand the expected
-		// output below.
 		assert_eq!(
 			tree.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(),
-			vec!["A", "B", "C", "D", "E", "F", "H", "L", "M", "O", "I", "G", "J", "K"],
+			vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "L", "M", "O", "J", "K"],
 		);
 
-		// let's add a block "P" which is a descendent of block "O"
-		let is_descendent_of = |base: &&str, block: &&str| -> Result<bool, TestError> {
-			match (*base, *block) {
-				(b, "P") => Ok(vec!["A", "F", "L", "O"].into_iter().any(|n| n == b)),
-				_ => Ok(false),
-			}
-		};
+		// after rebalancing the tree we should iterate in preorder exploring
+		// the longest forks first. check the ascii art above to understand the
+		// expected output below.
+		tree.rebalance();
 
-		tree.import("P", 6, (), &is_descendent_of).unwrap();
-
-		// this should re-order the tree, since the branch "A -> B -> C -> D -> E" is no longer tied
-		// with 5 blocks depth. additionally "O" should be visited before "M" now, since it has one
-		// descendent "P" which makes that branch 6 blocks long.
 		assert_eq!(
 			tree.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(),
-			["A", "F", "H", "L", "O", "P", "M", "I", "G", "B", "C", "D", "E", "J", "K"]
+			["A", "B", "C", "D", "E", "F", "H", "L", "M", "O", "I", "G", "J", "K"]
 		);
 	}
 }

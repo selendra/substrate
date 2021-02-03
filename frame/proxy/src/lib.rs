@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,7 +23,7 @@
 //! wish to execute some duration prior to execution happens. In this case, the target account may
 //! reject the announcement and in doing so, veto the execution.
 //!
-//! - [`proxy::Config`](./trait.Config.html)
+//! - [`proxy::Trait`](./trait.Trait.html)
 //! - [`Call`](./enum.Call.html)
 //!
 //! ## Overview
@@ -33,14 +33,10 @@
 //! ### Dispatchable Functions
 //!
 //! [`Call`]: ./enum.Call.html
-//! [`Config`]: ./trait.Config.html
+//! [`Trait`]: ./trait.Trait.html
 
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
-
-mod tests;
-mod benchmarking;
-pub mod weights;
 
 use sp_std::prelude::*;
 use codec::{Encode, Decode};
@@ -48,24 +44,41 @@ use sp_io::hashing::blake2_256;
 use sp_runtime::{DispatchResult, traits::{Dispatchable, Zero, Hash, Member, Saturating}};
 use frame_support::{
 	decl_module, decl_event, decl_error, decl_storage, Parameter, ensure, RuntimeDebug, traits::{
-		Get, ReservableCurrency, Currency, InstanceFilter, OriginTrait, IsType, IsSubType,
-	}, weights::{Weight, GetDispatchInfo}, dispatch::PostDispatchInfo, storage::IterableStorageMap,
+		Get, ReservableCurrency, Currency, InstanceFilter, OriginTrait, IsType,
+	}, weights::{Weight, GetDispatchInfo},
+	dispatch::{PostDispatchInfo, IsSubType}, storage::IterableStorageMap,
 };
 use frame_system::{self as system, ensure_signed};
 use frame_support::dispatch::DispatchError;
-pub use weights::WeightInfo;
 
-type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+mod tests;
+mod benchmarking;
+mod default_weight;
+
+type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+
+pub trait WeightInfo {
+	fn proxy_announced(a: u32, p: u32, ) -> Weight;
+	fn remove_announcement(a: u32, p: u32, ) -> Weight;
+	fn reject_announcement(a: u32, p: u32, ) -> Weight;
+	fn announce(a: u32, p: u32, ) -> Weight;
+	fn proxy(p: u32, ) -> Weight;
+	fn add_proxy(p: u32, ) -> Weight;
+	fn remove_proxy(p: u32, ) -> Weight;
+	fn remove_proxies(p: u32, ) -> Weight;
+	fn anonymous(p: u32, ) -> Weight;
+	fn kill_anonymous(p: u32, ) -> Weight;
+}
 
 /// Configuration trait.
-pub trait Config: frame_system::Config {
+pub trait Trait: frame_system::Trait {
 	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// The overarching call type.
 	type Call: Parameter + Dispatchable<Origin=Self::Origin, PostInfo=PostDispatchInfo>
 		+ GetDispatchInfo + From<frame_system::Call<Self>> + IsSubType<Call<Self>>
-		+ IsType<<Self as frame_system::Config>::Call>;
+		+ IsType<<Self as frame_system::Trait>::Call>;
 
 	/// The currency mechanism.
 	type Currency: ReservableCurrency<Self::AccountId>;
@@ -74,7 +87,7 @@ pub trait Config: frame_system::Config {
 	/// The instance filter determines whether a given call may be proxied under this type.
 	///
 	/// IMPORTANT: `Default` must be provided and MUST BE the the *most permissive* value.
-	type ProxyType: Parameter + Member + Ord + PartialOrd + InstanceFilter<<Self as Config>::Call>
+	type ProxyType: Parameter + Member + Ord + PartialOrd + InstanceFilter<<Self as Trait>::Call>
 		+ Default;
 
 	/// The base amount of currency needed to reserve for creating a proxy.
@@ -137,23 +150,23 @@ pub struct Announcement<AccountId, Hash, BlockNumber> {
 	height: BlockNumber,
 }
 
-type CallHashOf<T> = <<T as Config>::CallHasher as Hash>::Output;
+type CallHashOf<T> = <<T as Trait>::CallHasher as Hash>::Output;
 
 decl_storage! {
-	trait Store for Module<T: Config> as Proxy {
+	trait Store for Module<T: Trait> as Proxy {
 		/// The set of account proxies. Maps the account which has delegated to the accounts
 		/// which are being delegated to, together with the amount held on deposit.
-		pub Proxies get(fn proxies): map hasher(twox_64_concat) T::AccountId
+		pub Proxies: map hasher(twox_64_concat) T::AccountId
 			=> (Vec<ProxyDefinition<T::AccountId, T::ProxyType, T::BlockNumber>>, BalanceOf<T>);
 
 		/// The announcements made by the proxy (key).
-		pub Announcements get(fn announcements): map hasher(twox_64_concat) T::AccountId
+		pub Announcements: map hasher(twox_64_concat) T::AccountId
 			=> (Vec<Announcement<T::AccountId, CallHashOf<T>, T::BlockNumber>>, BalanceOf<T>);
 	}
 }
 
 decl_error! {
-	pub enum Error for Module<T: Config> {
+	pub enum Error for Module<T: Trait> {
 		/// There are too many proxies registered or too many announcements pending.
 		TooMany,
 		/// Proxy registration not found.
@@ -168,16 +181,14 @@ decl_error! {
 		NoPermission,
 		/// Announcement, if made at all, was made too recently.
 		Unannounced,
-		/// Cannot add self as proxy.
-		NoSelfProxy,
 	}
 }
 
 decl_event! {
 	/// Events type.
 	pub enum Event<T> where
-		AccountId = <T as frame_system::Config>::AccountId,
-		ProxyType = <T as Config>::ProxyType,
+		AccountId = <T as frame_system::Trait>::AccountId,
+		ProxyType = <T as Trait>::ProxyType,
 		Hash = CallHashOf<T>,
 	{
 		/// A proxy was executed correctly, with the given \[result\].
@@ -191,7 +202,7 @@ decl_event! {
 }
 
 decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		type Error = Error<T>;
 
 		/// Deposit one of this module's events by using the default implementation.
@@ -215,6 +226,22 @@ decl_module! {
 		/// `AnnouncementDepositFactor` metadata shadow.
 		const AnnouncementDepositFactor: BalanceOf<T> = T::AnnouncementDepositFactor::get();
 
+		fn on_runtime_upgrade() -> Weight {
+			Proxies::<T>::translate::<(Vec<(T::AccountId, T::ProxyType)>, BalanceOf<T>), _>(
+				|_, (targets, deposit)| Some((
+					targets.into_iter()
+						.map(|(a, t)| ProxyDefinition {
+							delegate: a,
+							proxy_type: t,
+							delay: Zero::zero(),
+						})
+						.collect::<Vec<_>>(),
+					deposit,
+				))
+			);
+			T::MaximumBlockWeight::get()
+		}
+
 		/// Dispatch the given `call` from an account that the sender is authorised for through
 		/// `add_proxy`.
 		///
@@ -233,15 +260,13 @@ decl_module! {
 		#[weight = {
 			let di = call.get_dispatch_info();
 			(T::WeightInfo::proxy(T::MaxProxies::get().into())
-				.saturating_add(di.weight)
-				 // AccountData for inner call origin accountdata.
-				.saturating_add(T::DbWeight::get().reads_writes(1, 1)),
+				.saturating_add(di.weight),
 			di.class)
 		}]
 		fn proxy(origin,
 			real: T::AccountId,
 			force_proxy_type: Option<T::ProxyType>,
-			call: Box<<T as Config>::Call>,
+			call: Box<<T as Trait>::Call>,
 		) {
 			let who = ensure_signed(origin)?;
 			let def = Self::find_proxy(&real, &who, force_proxy_type)?;
@@ -257,8 +282,6 @@ decl_module! {
 		/// Parameters:
 		/// - `proxy`: The account that the `caller` would like to make a proxy.
 		/// - `proxy_type`: The permissions allowed for this proxy account.
-		/// - `delay`: The announcement period required of the initial proxy. Will generally be
-		/// zero.
 		///
 		/// # <weight>
 		/// Weight is a function of the number of proxies the user has (P).
@@ -270,7 +293,21 @@ decl_module! {
 			delay: T::BlockNumber,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			Self::add_proxy_delegate(&who, delegate, proxy_type, delay)
+			Proxies::<T>::try_mutate(&who, |(ref mut proxies, ref mut deposit)| {
+				ensure!(proxies.len() < T::MaxProxies::get() as usize, Error::<T>::TooMany);
+				let proxy_def = ProxyDefinition { delegate, proxy_type, delay };
+				let i = proxies.binary_search(&proxy_def).err().ok_or(Error::<T>::Duplicate)?;
+				proxies.insert(i, proxy_def);
+				let new_deposit = T::ProxyDepositBase::get()
+					+ T::ProxyDepositFactor::get() * (proxies.len() as u32).into();
+				if new_deposit > *deposit {
+					T::Currency::reserve(&who, new_deposit - *deposit)?;
+				} else if new_deposit < *deposit {
+					T::Currency::unreserve(&who, *deposit - new_deposit);
+				}
+				*deposit = new_deposit;
+				Ok(())
+			})
 		}
 
 		/// Unregister a proxy account for the sender.
@@ -291,7 +328,26 @@ decl_module! {
 			delay: T::BlockNumber,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			Self::remove_proxy_delegate(&who, delegate, proxy_type, delay)
+			Proxies::<T>::try_mutate_exists(&who, |x| {
+				let (mut proxies, old_deposit) = x.take().ok_or(Error::<T>::NotFound)?;
+				let proxy_def = ProxyDefinition { delegate, proxy_type, delay };
+				let i = proxies.binary_search(&proxy_def).ok().ok_or(Error::<T>::NotFound)?;
+				proxies.remove(i);
+				let new_deposit = if proxies.is_empty() {
+					BalanceOf::<T>::zero()
+				} else {
+					T::ProxyDepositBase::get() + T::ProxyDepositFactor::get() * (proxies.len() as u32).into()
+				};
+				if new_deposit > old_deposit {
+					T::Currency::reserve(&who, new_deposit - old_deposit)?;
+				} else if new_deposit < old_deposit {
+					T::Currency::unreserve(&who, old_deposit - new_deposit);
+				}
+				if !proxies.is_empty() {
+					*x = Some((proxies, new_deposit))
+				}
+				Ok(())
+			})
 		}
 
 		/// Unregister all proxy accounts for the sender.
@@ -502,16 +558,14 @@ decl_module! {
 		#[weight = {
 			let di = call.get_dispatch_info();
 			(T::WeightInfo::proxy_announced(T::MaxPending::get(), T::MaxProxies::get().into())
-				.saturating_add(di.weight)
-				 // AccountData for inner call origin accountdata.
-				.saturating_add(T::DbWeight::get().reads_writes(1, 1)),
+				.saturating_add(di.weight),
 			di.class)
 		}]
 		fn proxy_announced(origin,
 			delegate: T::AccountId,
 			real: T::AccountId,
 			force_proxy_type: Option<T::ProxyType>,
-			call: Box<<T as Config>::Call>,
+			call: Box<<T as Trait>::Call>,
 		) {
 			ensure_signed(origin)?;
 			let def = Self::find_proxy(&real, &delegate, force_proxy_type)?;
@@ -527,19 +581,7 @@ decl_module! {
 	}
 }
 
-impl<T: Config> Module<T> {
-
-	/// Calculate the address of an anonymous account.
-	///
-	/// - `who`: The spawner account.
-	/// - `proxy_type`: The type of the proxy that the sender will be registered as over the
-	/// new account. This will almost always be the most permissive `ProxyType` possible to
-	/// allow for maximum flexibility.
-	/// - `index`: A disambiguation index, in case this is called multiple times in the same
-	/// transaction (e.g. with `utility::batch`). Unless you're using `batch` you probably just
-	/// want to use `0`.
-	/// - `maybe_when`: The block height and extrinsic index of when the anonymous account was
-	/// created. None to use current block height and extrinsic index.
+impl<T: Trait> Module<T> {
 	pub fn anonymous_account(
 		who: &T::AccountId,
 		proxy_type: &T::ProxyType,
@@ -553,77 +595,6 @@ impl<T: Config> Module<T> {
 		let entropy = (b"modlpy/proxy____", who, height, ext_index, proxy_type, index)
 			.using_encoded(blake2_256);
 		T::AccountId::decode(&mut &entropy[..]).unwrap_or_default()
-	}
-
-	/// Register a proxy account for the delegator that is able to make calls on its behalf.
-	///
-	/// Parameters:
-	/// - `delegator`: The delegator account.
-	/// - `delegatee`: The account that the `delegator` would like to make a proxy.
-	/// - `proxy_type`: The permissions allowed for this proxy account.
-	/// - `delay`: The announcement period required of the initial proxy. Will generally be
-	/// zero.
-	pub fn add_proxy_delegate(
-		delegator: &T::AccountId,
-		delegatee: T::AccountId,
-		proxy_type: T::ProxyType,
-		delay: T::BlockNumber,
-	) -> DispatchResult {
-		ensure!(delegator != &delegatee, Error::<T>::NoSelfProxy);
-		Proxies::<T>::try_mutate(delegator, |(ref mut proxies, ref mut deposit)| {
-			ensure!(proxies.len() < T::MaxProxies::get() as usize, Error::<T>::TooMany);
-			let proxy_def = ProxyDefinition { delegate: delegatee, proxy_type, delay };
-			let i = proxies.binary_search(&proxy_def).err().ok_or(Error::<T>::Duplicate)?;
-			proxies.insert(i, proxy_def);
-			let new_deposit = Self::deposit(proxies.len() as u32);
-			if new_deposit > *deposit {
-				T::Currency::reserve(delegator, new_deposit - *deposit)?;
-			} else if new_deposit < *deposit {
-				T::Currency::unreserve(delegator, *deposit - new_deposit);
-			}
-			*deposit = new_deposit;
-			Ok(())
-		})
-	}
-
-	/// Unregister a proxy account for the delegator.
-	///
-	/// Parameters:
-	/// - `delegator`: The delegator account.
-	/// - `delegatee`: The account that the `delegator` would like to make a proxy.
-	/// - `proxy_type`: The permissions allowed for this proxy account.
-	/// - `delay`: The announcement period required of the initial proxy. Will generally be
-	/// zero.
-	pub fn remove_proxy_delegate(
-		delegator: &T::AccountId,
-		delegatee: T::AccountId,
-		proxy_type: T::ProxyType,
-		delay: T::BlockNumber,
-	) -> DispatchResult {
-		Proxies::<T>::try_mutate_exists(delegator, |x| {
-			let (mut proxies, old_deposit) = x.take().ok_or(Error::<T>::NotFound)?;
-			let proxy_def = ProxyDefinition { delegate: delegatee, proxy_type, delay };
-			let i = proxies.binary_search(&proxy_def).ok().ok_or(Error::<T>::NotFound)?;
-			proxies.remove(i);
-			let new_deposit = Self::deposit(proxies.len() as u32);
-			if new_deposit > old_deposit {
-				T::Currency::reserve(delegator, new_deposit - old_deposit)?;
-			} else if new_deposit < old_deposit {
-				T::Currency::unreserve(delegator, old_deposit - new_deposit);
-			}
-			if !proxies.is_empty() {
-				*x = Some((proxies, new_deposit))
-			}
-			Ok(())
-		})
-	}
-
-	pub fn deposit(num_proxies: u32) -> BalanceOf<T> {
-		if num_proxies == 0 {
-			Zero::zero()
-		} else {
-			T::ProxyDepositBase::get() + T::ProxyDepositFactor::get() * num_proxies.into()
-		}
 	}
 
 	fn rejig_deposit(
@@ -683,12 +654,12 @@ impl<T: Config> Module<T> {
 	fn do_proxy(
 		def: ProxyDefinition<T::AccountId, T::ProxyType, T::BlockNumber>,
 		real: T::AccountId,
-		call: <T as Config>::Call,
+		call: <T as Trait>::Call,
 	) {
 		// This is a freshly authenticated new account, the origin restrictions doesn't apply.
 		let mut origin: T::Origin = frame_system::RawOrigin::Signed(real).into();
-		origin.add_filter(move |c: &<T as frame_system::Config>::Call| {
-			let c = <T as Config>::Call::from_ref(c);
+		origin.add_filter(move |c: &<T as frame_system::Trait>::Call| {
+			let c = <T as Trait>::Call::from_ref(c);
 			// We make sure the proxy call does access this pallet to change modify proxies.
 			match c.is_sub_type() {
 				// Proxy call cannot add or remove a proxy with more permissions than it already has.
@@ -702,34 +673,5 @@ impl<T: Config> Module<T> {
 		});
 		let e = call.dispatch(origin);
 		Self::deposit_event(RawEvent::ProxyExecuted(e.map(|_| ()).map_err(|e| e.error)));
-	}
-}
-
-/// Migration utilities for upgrading the Proxy pallet between its different versions.
-pub mod migration {
-	use super::*;
-
-	/// Migration code for <https://github.com/paritytech/substrate/pull/6770>
-	///
-	/// Details: This migration was introduced between Substrate 2.0-RC6 and Substrate 2.0 releases.
-	/// Before this migration, the `Proxies` storage item used a tuple of `AccountId` and
-	/// `ProxyType` to represent the proxy definition. After #6770, we switched to use a struct
-	/// `ProxyDefinition` which additionally included a `BlockNumber` delay value. This function,
-	/// simply takes any existing proxies using the old tuple format, and migrates it to the new
-	/// struct by setting the delay to zero.
-	pub fn migrate_to_time_delayed_proxies<T: Config>() -> Weight {
-		Proxies::<T>::translate::<(Vec<(T::AccountId, T::ProxyType)>, BalanceOf<T>), _>(
-			|_, (targets, deposit)| Some((
-				targets.into_iter()
-					.map(|(a, t)| ProxyDefinition {
-						delegate: a,
-						proxy_type: t,
-						delay: Zero::zero(),
-					})
-					.collect::<Vec<_>>(),
-				deposit,
-			))
-		);
-		T::BlockWeights::get().max_block
 	}
 }

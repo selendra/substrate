@@ -1,4 +1,3 @@
-<!-- markdown-link-check-disable -->
 # Example Pallet
 
 <!-- Original author of paragraph: @gavofyork -->
@@ -195,7 +194,7 @@ Copy and paste this template from frame/example/src/lib.rs into file
 \```rust
 use <INSERT_CUSTOM_PALLET_NAME>;
 
-pub trait Config: <INSERT_CUSTOM_PALLET_NAME>::Config { }
+pub trait Trait: <INSERT_CUSTOM_PALLET_NAME>::Trait { }
 \```
 
 \### Simple Code Snippet

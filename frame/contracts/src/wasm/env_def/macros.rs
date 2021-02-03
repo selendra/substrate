@@ -1,19 +1,18 @@
+// Copyright 2018-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2018-2021 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
+// Substrate is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Substrate is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with Substrate. If not, see <http://www.gnu.org/licenses/>.
 
 //! Definition of macros that hides boilerplate of defining external environment
 //! for a wasm module.
@@ -97,7 +96,7 @@ macro_rules! unmarshall_then_body {
 #[inline(always)]
 pub fn constrain_closure<R, F>(f: F) -> F
 where
-	F: FnOnce() -> Result<R, crate::wasm::runtime::TrapReason>,
+	F: FnOnce() -> Result<R, sp_sandbox::HostError>,
 {
 	f
 }
@@ -110,20 +109,14 @@ macro_rules! unmarshall_then_body_then_marshall {
 		>(|| {
 			unmarshall_then_body!($body, $ctx, $args_iter, $( $names : $params ),*)
 		});
-		let r = body().map_err(|reason| {
-			$ctx.set_trap_reason(reason);
-			sp_sandbox::HostError
-		})?;
+		let r = body()?;
 		return Ok(sp_sandbox::ReturnValue::Value({ use $crate::wasm::env_def::ConvertibleToWasm; r.to_typed_value() }))
 	});
 	( $args_iter:ident, $ctx:ident, ( $( $names:ident : $params:ty ),* ) => $body:tt ) => ({
 		let body = $crate::wasm::env_def::macros::constrain_closure::<(), _>(|| {
 			unmarshall_then_body!($body, $ctx, $args_iter, $( $names : $params ),*)
 		});
-		body().map_err(|reason| {
-			$ctx.set_trap_reason(reason);
-			sp_sandbox::HostError
-		})?;
+		body()?;
 		return Ok(sp_sandbox::ReturnValue::Unit)
 	})
 }
@@ -134,12 +127,7 @@ macro_rules! define_func {
 		fn $name< E: $seal_ty >(
 			$ctx: &mut $crate::wasm::Runtime<E>,
 			args: &[sp_sandbox::Value],
-		) -> Result<sp_sandbox::ReturnValue, sp_sandbox::HostError>
-			where
-				<E::T as frame_system::Config>::AccountId:
-					sp_core::crypto::UncheckedFrom<<E::T as frame_system::Config>::Hash> +
-						AsRef<[u8]>
-		{
+		) -> Result<sp_sandbox::ReturnValue, sp_sandbox::HostError> {
 			#[allow(unused)]
 			let mut args = args.iter();
 
@@ -195,12 +183,7 @@ macro_rules! define_env {
 			}
 		}
 
-		impl<E: Ext> $crate::wasm::env_def::FunctionImplProvider<E> for $init_name
-		where
-			<E::T as frame_system::Config>::AccountId:
-				sp_core::crypto::UncheckedFrom<<E::T as frame_system::Config>::Hash> +
-					AsRef<[u8]>
-		{
+		impl<E: Ext> $crate::wasm::env_def::FunctionImplProvider<E> for $init_name {
 			fn impls<F: FnMut(&[u8], $crate::wasm::env_def::HostFunc<E>)>(f: &mut F) {
 				register_func!(f, < E: $seal_ty > ; $( $name ( $ctx $( , $names : $params )* ) $( -> $returns)* => $body )* );
 			}
@@ -214,24 +197,15 @@ mod tests {
 	use parity_wasm::elements::ValueType;
 	use sp_runtime::traits::Zero;
 	use sp_sandbox::{ReturnValue, Value};
-	use crate::{
-		wasm::{Runtime, runtime::TrapReason, tests::MockExt},
-		exec::Ext,
-		gas::Gas,
-	};
-
-	struct TestRuntime {
-		value: u32,
-	}
-
-	impl TestRuntime {
-		fn set_trap_reason(&mut self, _reason: TrapReason) {}
-	}
+	use crate::wasm::tests::MockExt;
+	use crate::wasm::Runtime;
+	use crate::exec::Ext;
+	use crate::gas::Gas;
 
 	#[test]
 	fn macro_unmarshall_then_body_then_marshall_value_or_trap() {
 		fn test_value(
-			_ctx: &mut TestRuntime,
+			_ctx: &mut u32,
 			args: &[sp_sandbox::Value],
 		) -> Result<ReturnValue, sp_sandbox::HostError> {
 			let mut args = args.iter();
@@ -240,7 +214,7 @@ mod tests {
 				_ctx,
 				(a: u32, b: u32) -> u32 => {
 					if b == 0 {
-						Err(crate::wasm::runtime::TrapReason::Termination)
+						Err(sp_sandbox::HostError)
 					} else {
 						Ok(a / b)
 					}
@@ -248,7 +222,7 @@ mod tests {
 			)
 		}
 
-		let ctx = &mut TestRuntime { value: 0 };
+		let ctx = &mut 0;
 		assert_eq!(
 			test_value(ctx, &[Value::I32(15), Value::I32(3)]).unwrap(),
 			ReturnValue::Value(Value::I32(5)),
@@ -259,7 +233,7 @@ mod tests {
 	#[test]
 	fn macro_unmarshall_then_body_then_marshall_unit() {
 		fn test_unit(
-			ctx: &mut TestRuntime,
+			ctx: &mut u32,
 			args: &[sp_sandbox::Value],
 		) -> Result<ReturnValue, sp_sandbox::HostError> {
 			let mut args = args.iter();
@@ -267,16 +241,16 @@ mod tests {
 				args,
 				ctx,
 				(a: u32, b: u32) => {
-					ctx.value = a + b;
+					*ctx = a + b;
 					Ok(())
 				}
 			)
 		}
 
-		let ctx = &mut TestRuntime { value: 0 };
+		let ctx = &mut 0;
 		let result = test_unit(ctx, &[Value::I32(2), Value::I32(3)]).unwrap();
 		assert_eq!(result, ReturnValue::Unit);
-		assert_eq!(ctx.value, 5);
+		assert_eq!(*ctx, 5);
 	}
 
 	#[test]
@@ -286,7 +260,7 @@ mod tests {
 			if !amount.is_zero() {
 				Ok(())
 			} else {
-				Err(TrapReason::Termination)
+				Err(sp_sandbox::HostError)
 			}
 		});
 		let _f: fn(&mut Runtime<MockExt>, &[sp_sandbox::Value])
@@ -338,7 +312,7 @@ mod tests {
 				if !amount.is_zero() {
 					Ok(())
 				} else {
-					Err(crate::wasm::runtime::TrapReason::Termination)
+					Err(sp_sandbox::HostError)
 				}
 			},
 		);

@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2020-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -29,16 +29,16 @@ use frame_support::{
 use frame_system::{RawOrigin, ensure_signed, ensure_none};
 
 decl_storage! {
-	trait Store for Module<T: Config> as Test where
-		<T as OtherConfig>::OtherEvent: Into<<T as Config>::Event>
+	trait Store for Module<T: Trait> as Test where
+		<T as OtherTrait>::OtherEvent: Into<<T as Trait>::Event>
 	{
 		Value get(fn value): Option<u32>;
 	}
 }
 
 decl_module! {
-	pub struct Module<T: Config> for enum Call where
-		origin: T::Origin, <T as OtherConfig>::OtherEvent: Into<<T as Config>::Event>
+	pub struct Module<T: Trait> for enum Call where
+		origin: T::Origin, <T as OtherTrait>::OtherEvent: Into<<T as Trait>::Event>
 	{
 		#[weight = 0]
 		fn set_value(origin, n: u32) -> DispatchResult {
@@ -59,12 +59,12 @@ impl_outer_origin! {
 	pub enum Origin for Test where system = frame_system {}
 }
 
-pub trait OtherConfig {
+pub trait OtherTrait {
 	type OtherEvent;
 }
 
-pub trait Config: frame_system::Config + OtherConfig
-	where Self::OtherEvent: Into<<Self as Config>::Event>
+pub trait Trait: frame_system::Trait + OtherTrait
+	where Self::OtherEvent: Into<<Self as Trait>::Event>
 {
 	type Event;
 }
@@ -72,11 +72,8 @@ pub trait Config: frame_system::Config + OtherConfig
 #[derive(Clone, Eq, PartialEq)]
 pub struct Test;
 
-impl frame_system::Config for Test {
+impl frame_system::Trait for Test {
 	type BaseCallFilter = ();
-	type BlockWeights = ();
-	type BlockLength = ();
-	type DbWeight = ();
 	type Origin = Origin;
 	type Index = u64;
 	type BlockNumber = u64;
@@ -88,20 +85,26 @@ impl frame_system::Config for Test {
 	type Header = Header;
 	type Event = ();
 	type BlockHashCount = ();
+	type MaximumBlockWeight = ();
+	type DbWeight = ();
+	type BlockExecutionWeight = ();
+	type ExtrinsicBaseWeight = ();
+	type MaximumExtrinsicWeight = ();
+	type MaximumBlockLength = ();
+	type AvailableBlockRatio = ();
 	type Version = ();
 	type PalletInfo = ();
 	type AccountData = ();
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
-	type SS58Prefix = ();
 }
 
-impl Config for Test {
+impl Trait for Test {
 	type Event = ();
 }
 
-impl OtherConfig for Test {
+impl OtherTrait for Test {
 	type OtherEvent = ();
 }
 
@@ -110,10 +113,15 @@ fn new_test_ext() -> sp_io::TestExternalities {
 }
 
 benchmarks!{
-	where_clause { where <T as OtherConfig>::OtherEvent: Into<<T as Config>::Event> }
+	where_clause { where <T as OtherTrait>::OtherEvent: Into<<T as Trait>::Event> }
+
+	_ {
+		// Define a common range for `b`.
+		let b in 1 .. 1000 => ();
+	}
 
 	set_value {
-		let b in 1 .. 1000;
+		let b in ...;
 		let caller = account::<T::AccountId>("caller", 0, 0);
 	}: _ (RawOrigin::Signed(caller), b.into())
 	verify {
@@ -121,7 +129,7 @@ benchmarks!{
 	}
 
 	other_name {
-		let b in 1 .. 1000;
+		let b in ...;
 	}: dummy (RawOrigin::None, b.into())
 
 	sort_vector {
@@ -137,7 +145,7 @@ benchmarks!{
 	}
 
 	bad_origin {
-		let b in 1 .. 1000;
+		let b in ...;
 		let caller = account::<T::AccountId>("caller", 0, 0);
 	}: dummy (RawOrigin::Signed(caller), b.into())
 

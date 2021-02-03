@@ -1,20 +1,18 @@
+// Copyright 2019 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-
-// This program is free software: you can redistribute it and/or modify
+// Substrate is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
+// Substrate is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
 // You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Block sealing utilities
 
@@ -89,10 +87,10 @@ pub async fn seal_block<B, BI, SC, C, E, P>(
 			+ Send + Sync + 'static,
 		C: HeaderBackend<B> + ProvideRuntimeApi<B>,
 		E: Environment<B>,
-		E::Proposer: Proposer<B, Transaction = TransactionFor<C, B>>,
+		<E as Environment<B>>::Error: std::fmt::Display,
+		<E::Proposer as Proposer<B>>::Error: std::fmt::Display,
 		P: txpool::ChainApi<Block=B>,
 		SC: SelectChain<B>,
-		TransactionFor<C, B>: 'static,
 {
 	let future = async {
 		if pool.validated_pool().status().ready == 0 && !create_empty {
@@ -113,7 +111,7 @@ pub async fn seal_block<B, BI, SC, C, E, P>(
 		};
 
 		let proposer = env.init(&parent)
-			.map_err(|err| Error::StringError(format!("{:?}", err))).await?;
+			.map_err(|err| Error::StringError(format!("{}", err))).await?;
 		let id = inherent_data_provider.create_inherent_data()?;
 		let inherents_len = id.len();
 
@@ -124,7 +122,7 @@ pub async fn seal_block<B, BI, SC, C, E, P>(
 		};
 
 		let proposal = proposer.propose(id.clone(), digest, Duration::from_secs(MAX_PROPOSAL_DURATION), false.into())
-			.map_err(|err| Error::StringError(format!("{:?}", err))).await?;
+			.map_err(|err| Error::StringError(format!("{}", err))).await?;
 
 		if proposal.block.extrinsics().len() == inherents_len && !create_empty {
 			return Err(Error::EmptyTransactionPool)
@@ -135,7 +133,6 @@ pub async fn seal_block<B, BI, SC, C, E, P>(
 		params.body = Some(body);
 		params.finalized = finalize;
 		params.fork_choice = Some(ForkChoiceStrategy::LongestChain);
-		params.storage_changes = Some(proposal.storage_changes);
 
 		if let Some(digest_provider) = digest_provider {
 			digest_provider.append_block_import(&parent, &mut params, &id)?;

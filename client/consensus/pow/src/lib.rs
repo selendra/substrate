@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2017-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2017-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 // This program is free software: you can redistribute it and/or modify
@@ -56,7 +56,7 @@ use sp_consensus::{
 	BlockCheckParams, ImportResult,
 };
 use sp_consensus::import_queue::{
-	BoxBlockImport, BasicQueue, Verifier, BoxJustificationImport,
+	BoxBlockImport, BasicQueue, Verifier, BoxJustificationImport, BoxFinalityProofImport,
 };
 use codec::{Encode, Decode};
 use prometheus_endpoint::Registry;
@@ -503,6 +503,7 @@ pub type PowImportQueue<B, Transaction> = BasicQueue<B, Transaction>;
 pub fn import_queue<B, Transaction, Algorithm>(
 	block_import: BoxBlockImport<B, Transaction>,
 	justification_import: Option<BoxJustificationImport<B>>,
+	finality_proof_import: Option<BoxFinalityProofImport<B>>,
 	algorithm: Algorithm,
 	inherent_data_providers: InherentDataProviders,
 	spawner: &impl sp_core::traits::SpawnNamed,
@@ -523,6 +524,7 @@ pub fn import_queue<B, Transaction, Algorithm>(
 		verifier,
 		block_import,
 		justification_import,
+		finality_proof_import,
 		spawner,
 		registry,
 	))

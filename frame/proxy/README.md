@@ -16,6 +16,6 @@ reject the announcement and in doing so, veto the execution.
 ### Dispatchable Functions
 
 [`Call`]: ./enum.Call.html
-[`Config`]: ./trait.Config.html
+[`Trait`]: ./trait.Trait.html
 
 License: Apache-2.0

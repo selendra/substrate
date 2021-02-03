@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2020-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,37 +23,36 @@ use frame_support::{
 	weights::Weight,
 };
 use sp_core::H256;
-use sp_runtime::{traits::{BlakeTwo256, IdentityLookup}, testing::Header};
+use sp_runtime::{Perbill, traits::{BlakeTwo256, IdentityLookup}, testing::Header};
 use sp_io;
 use crate as sudo;
 use frame_support::traits::Filter;
-use frame_system::limits;
 
 // Logger module to track execution.
 pub mod logger {
 	use super::*;
 	use frame_system::ensure_root;
 
-	pub trait Config: frame_system::Config {
-		type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+	pub trait Trait: frame_system::Trait {
+		type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 	}
 
 	decl_storage! {
-		trait Store for Module<T: Config> as Logger {
+		trait Store for Module<T: Trait> as Logger {
 			AccountLog get(fn account_log): Vec<T::AccountId>;
 			I32Log get(fn i32_log): Vec<i32>;
 		}
 	}
 
 	decl_event! {
-		pub enum Event<T> where AccountId = <T as frame_system::Config>::AccountId {
+		pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId {
 			AppendI32(i32, Weight),
 			AppendI32AndAccount(AccountId, i32, Weight),
 		}
 	}
 
 	decl_module! {
-		pub struct Module<T: Config> for enum Call where origin: <T as frame_system::Config>::Origin {
+		pub struct Module<T: Trait> for enum Call where origin: <T as frame_system::Trait>::Origin {
 			fn deposit_event() = default;
 
 			#[weight = *weight]
@@ -107,7 +106,9 @@ pub struct Test;
 
 parameter_types! {
 	pub const BlockHashCount: u64 = 250;
-	pub BlockWeights: limits::BlockWeights = limits::BlockWeights::simple_max(1024);
+	pub const MaximumBlockWeight: Weight = 1024;
+	pub const MaximumBlockLength: u32 = 2 * 1024;
+	pub const AvailableBlockRatio: Perbill = Perbill::one();
 }
 
 pub struct BlockEverything;
@@ -117,11 +118,8 @@ impl Filter<Call> for BlockEverything {
 	}
 }
 
-impl frame_system::Config for Test {
+impl frame_system::Trait for Test {
 	type BaseCallFilter = BlockEverything;
-	type BlockWeights = ();
-	type BlockLength = ();
-	type DbWeight = ();
 	type Origin = Origin;
 	type Call = Call;
 	type Index = u64;
@@ -133,22 +131,28 @@ impl frame_system::Config for Test {
 	type Header = Header;
 	type Event = TestEvent;
 	type BlockHashCount = BlockHashCount;
+	type MaximumBlockWeight = MaximumBlockWeight;
+	type DbWeight = ();
+	type BlockExecutionWeight = ();
+	type ExtrinsicBaseWeight = ();
+	type MaximumExtrinsicWeight = MaximumBlockWeight;
+	type MaximumBlockLength = MaximumBlockLength;
+	type AvailableBlockRatio = AvailableBlockRatio;
 	type Version = ();
 	type PalletInfo = ();
 	type AccountData = ();
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
-	type SS58Prefix = ();
 }
 
-// Implement the logger module's `Config` on the Test runtime.
-impl logger::Config for Test {
+// Implement the logger module's `Trait` on the Test runtime.
+impl logger::Trait for Test {
 	type Event = TestEvent;
 }
 
-// Implement the sudo module's `Config` on the Test runtime.
-impl Config for Test {
+// Implement the sudo module's `Trait` on the Test runtime.
+impl Trait for Test {
 	type Event = TestEvent;
 	type Call = Call;
 }

@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +17,7 @@
 
 //! # Identity Module
 //!
-//! - [`identity::Config`](./trait.Config.html)
+//! - [`identity::Trait`](./trait.Trait.html)
 //! - [`Call`](./enum.Call.html)
 //!
 //! ## Overview
@@ -68,14 +68,9 @@
 //! * `kill_identity` - Forcibly remove the associated identity; the deposit is lost.
 //!
 //! [`Call`]: ./enum.Call.html
-//! [`Config`]: ./trait.Config.html
+//! [`Trait`]: ./trait.Trait.html
 
 #![cfg_attr(not(feature = "std"), no_std)]
-
-#[cfg(test)]
-mod tests;
-mod benchmarking;
-pub mod weights;
 
 use sp_std::prelude::*;
 use sp_std::{fmt::Debug, ops::Add, iter::once};
@@ -87,16 +82,40 @@ use frame_support::{
 	decl_module, decl_event, decl_storage, ensure, decl_error,
 	dispatch::DispatchResultWithPostInfo,
 	traits::{Currency, ReservableCurrency, OnUnbalanced, Get, BalanceStatus, EnsureOrigin},
+	weights::Weight,
 };
 use frame_system::ensure_signed;
-pub use weights::WeightInfo;
 
-type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
+#[cfg(test)]
+mod tests;
+mod benchmarking;
+mod default_weights;
 
-pub trait Config: frame_system::Config {
+type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+type NegativeImbalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::NegativeImbalance;
+
+pub trait WeightInfo {
+	fn add_registrar(r: u32, ) -> Weight;
+	fn set_identity(r: u32, x: u32, ) -> Weight;
+	fn set_subs_new(s: u32, ) -> Weight;
+	fn set_subs_old(p: u32, ) -> Weight;
+	fn add_sub(p: u32, ) -> Weight;
+	fn rename_sub(p: u32, ) -> Weight;
+	fn remove_sub(p: u32, ) -> Weight;
+	fn quit_sub(p: u32, ) -> Weight;
+	fn clear_identity(r: u32, s: u32, x: u32, ) -> Weight;
+	fn request_judgement(r: u32, x: u32, ) -> Weight;
+	fn cancel_request(r: u32, x: u32, ) -> Weight;
+	fn set_fee(r: u32, ) -> Weight;
+	fn set_account_id(r: u32, ) -> Weight;
+	fn set_fields(r: u32, ) -> Weight;
+	fn provide_judgement(r: u32, x: u32, ) -> Weight;
+	fn kill_identity(r: u32, s: u32, x: u32, ) -> Weight;
+}
+
+pub trait Trait: frame_system::Trait {
 	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// The currency trait.
 	type Currency: ReservableCurrency<Self::AccountId>;
@@ -399,7 +418,7 @@ pub struct RegistrarInfo<
 }
 
 decl_storage! {
-	trait Store for Module<T: Config> as Identity {
+	trait Store for Module<T: Trait> as Identity {
 		/// Information that is pertinent to identify the entity behind an account.
 		///
 		/// TWOX-NOTE: OK ― `AccountId` is a secure hash.
@@ -428,7 +447,7 @@ decl_storage! {
 }
 
 decl_event!(
-	pub enum Event<T> where AccountId = <T as frame_system::Config>::AccountId, Balance = BalanceOf<T> {
+	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId, Balance = BalanceOf<T> {
 		/// A name was set or reset (which will remove all judgements). \[who\]
 		IdentitySet(AccountId),
 		/// A name was cleared, and the given balance returned. \[who, deposit\]
@@ -456,7 +475,7 @@ decl_event!(
 
 decl_error! {
 	/// Error for the identity module.
-	pub enum Error for Module<T: Config> {
+	pub enum Error for Module<T: Trait> {
 		/// Too many subs-accounts.
 		TooManySubAccounts,
 		/// Account isn't found.
@@ -494,7 +513,7 @@ decl_error! {
 
 decl_module! {
 	/// Identity module declaration.
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		/// The amount held on deposit for a registered identity.
 		const BasicDeposit: BalanceOf<T> = T::BasicDeposit::get();
 
@@ -1125,7 +1144,7 @@ decl_module! {
 	}
 }
 
-impl<T: Config> Module<T> {
+impl<T: Trait> Module<T> {
 	/// Get the subs of an account.
 	pub fn subs(who: &T::AccountId) -> Vec<(T::AccountId, Data)> {
 		SubsOf::<T>::get(who).1
@@ -1134,4 +1153,3 @@ impl<T: Config> Module<T> {
 			.collect()
 	}
 }
-

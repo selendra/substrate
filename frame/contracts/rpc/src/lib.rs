@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,12 +31,13 @@ use sp_rpc::number;
 use sp_runtime::{
 	generic::BlockId,
 	traits::{Block as BlockT, Header as HeaderT},
-	DispatchError,
 };
-use std::convert::{TryFrom, TryInto};
-use pallet_contracts_primitives::ContractExecResult;
+use std::convert::TryInto;
 
-pub use pallet_contracts_rpc_runtime_api::ContractsApi as ContractsRuntimeApi;
+pub use self::gen_client::Client as ContractsClient;
+pub use pallet_contracts_rpc_runtime_api::{
+	self as runtime_api, ContractExecResult, ContractsApi as ContractsRuntimeApi,
+};
 
 const RUNTIME_ERROR: i64 = 1;
 const CONTRACT_DOESNT_EXIST: i64 = 2;
@@ -76,55 +77,45 @@ impl From<ContractAccessError> for Error {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-pub struct CallRequest<AccountId> {
+pub struct CallRequest<AccountId, Balance> {
 	origin: AccountId,
 	dest: AccountId,
-	value: number::NumberOrHex,
+	value: Balance,
 	gas_limit: number::NumberOrHex,
 	input_data: Bytes,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-#[serde(rename_all = "camelCase")]
-struct RpcContractExecSuccess {
-	/// The return flags. See `pallet_contracts_primitives::ReturnFlags`.
-	flags: u32,
-	/// Data as returned by the contract.
-	data: Bytes,
 }
 
 /// An RPC serializable result of contract execution
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
-pub struct RpcContractExecResult {
-	/// How much gas was consumed by the call. In case of an error this is the amount
-	/// that was used up until the error occurred.
-	gas_consumed: u64,
-	/// Additional dynamic human readable error information for debugging. An empty string
-	/// indicates that no additional information is available.
-	debug_message: String,
-	/// Indicates whether the contract execution was successful or not.
-	result: std::result::Result<RpcContractExecSuccess, DispatchError>,
+pub enum RpcContractExecResult {
+	/// Successful execution
+	Success {
+		/// The return flags
+		flags: u32,
+		/// Output data
+		data: Bytes,
+		/// How much gas was consumed by the call.
+		gas_consumed: u64,
+	},
+	/// Error execution
+	Error(()),
 }
 
 impl From<ContractExecResult> for RpcContractExecResult {
 	fn from(r: ContractExecResult) -> Self {
-		match r.exec_result {
-			Ok(val) => RpcContractExecResult {
-				gas_consumed: r.gas_consumed,
-				debug_message: String::new(),
-				result: Ok(RpcContractExecSuccess {
-					flags: val.flags.bits(),
-					data: val.data.into(),
-				}),
+		match r {
+			ContractExecResult::Success {
+				flags,
+				data,
+				gas_consumed
+			} => RpcContractExecResult::Success {
+				flags,
+				data: data.into(),
+				gas_consumed,
 			},
-			Err(err) => RpcContractExecResult {
-				gas_consumed: r.gas_consumed,
-				debug_message: String::new(),
-				result: Err(err.error),
-			},
+			ContractExecResult::Error => RpcContractExecResult::Error(()),
 		}
 	}
 }
@@ -141,7 +132,7 @@ pub trait ContractsApi<BlockHash, BlockNumber, AccountId, Balance> {
 	#[rpc(name = "contracts_call")]
 	fn call(
 		&self,
-		call_request: CallRequest<AccountId>,
+		call_request: CallRequest<AccountId, Balance>,
 		at: Option<BlockHash>,
 	) -> Result<RpcContractExecResult>;
 
@@ -201,11 +192,11 @@ where
 		<<Block as BlockT>::Header as HeaderT>::Number,
 	>,
 	AccountId: Codec,
-	Balance: Codec + TryFrom<number::NumberOrHex>,
+	Balance: Codec,
 {
 	fn call(
 		&self,
-		call_request: CallRequest<AccountId>,
+		call_request: CallRequest<AccountId, Balance>,
 		at: Option<<Block as BlockT>::Hash>,
 	) -> Result<RpcContractExecResult> {
 		let api = self.client.runtime_api();
@@ -220,13 +211,6 @@ where
 			gas_limit,
 			input_data,
 		} = call_request;
-
-		// Make sure that value fits into the balance type.
-		let value: Balance = value.try_into().map_err(|_| Error {
-			code: ErrorCode::InvalidParams,
-			message: format!("{:?} doesn't fit into the balance type", value),
-			data: None,
-		})?;
 
 		// Make sure that gas_limit fits into 64 bits.
 		let gas_limit: u64 = gas_limit.try_into().map_err(|_| Error {
@@ -249,7 +233,7 @@ where
 
 		let exec_result = api
 			.call(&at, origin, dest, value, gas_limit, input_data.to_vec())
-			.map_err(runtime_error_into_rpc_err)?;
+			.map_err(|e| runtime_error_into_rpc_err(e))?;
 
 		Ok(exec_result.into())
 	}
@@ -267,7 +251,7 @@ where
 
 		let result = api
 			.get_storage(&at, address, key.into())
-			.map_err(runtime_error_into_rpc_err)?
+			.map_err(|e| runtime_error_into_rpc_err(e))?
 			.map_err(ContractAccessError)?
 			.map(Bytes);
 
@@ -286,7 +270,7 @@ where
 
 		let result = api
 			.rent_projection(&at, address)
-			.map_err(runtime_error_into_rpc_err)?
+			.map_err(|e| runtime_error_into_rpc_err(e))?
 			.map_err(ContractAccessError)?;
 
 		Ok(match result {
@@ -312,18 +296,17 @@ mod tests {
 
 	#[test]
 	fn call_request_should_serialize_deserialize_properly() {
-		type Req = CallRequest<String>;
+		type Req = CallRequest<String, u128>;
 		let req: Req = serde_json::from_str(r#"
 		{
 			"origin": "5CiPPseXPECbkjWCa6MnjNokrgYjMqmKndv2rSnekmSK2DjL",
 			"dest": "5DRakbLVnjVrW6niwLfHGW24EeCEvDAFGEXrtaYS5M4ynoom",
-			"value": "0x112210f4B16c1cb1",
+			"value": 0,
 			"gasLimit": 1000000000000,
 			"inputData": "0x8c97db39"
 		}
 		"#).unwrap();
 		assert_eq!(req.gas_limit.into_u256(), U256::from(0xe8d4a51000u64));
-		assert_eq!(req.value.into_u256(), U256::from(1234567890987654321u128));
 	}
 
 	#[test]
@@ -333,7 +316,7 @@ mod tests {
 			let actual = serde_json::to_string(&res).unwrap();
 			assert_eq!(actual, expected);
 		}
-		test(r#"{"gasConsumed":5000,"debugMessage":"helpOk","result":{"Ok":{"flags":5,"data":"0x1234"}}}"#);
-		test(r#"{"gasConsumed":3400,"debugMessage":"helpErr","result":{"Err":"BadOrigin"}}"#);
+		test(r#"{"success":{"flags":5,"data":"0x1234","gas_consumed":5000}}"#);
+		test(r#"{"error":null}"#);
 	}
 }

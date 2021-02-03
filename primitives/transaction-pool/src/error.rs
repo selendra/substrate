@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2018-2021 Parity Technologies (UK) Ltd.
+// Copyright (C) 2018-2020 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,48 +25,48 @@ use sp_runtime::transaction_validity::{
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Transaction pool error type.
-#[derive(Debug, thiserror::Error, derive_more::From)]
-#[allow(missing_docs)]
+#[derive(Debug, derive_more::Display, derive_more::From)]
 pub enum Error {
-	#[error("Unknown transaction validity: {0:?}")]
+	/// Transaction is not verifiable yet, but might be in the future.
+	#[display(fmt="Unknown transaction validity: {:?}", _0)]
 	UnknownTransaction(UnknownTransaction),
-
-	#[error("Invalid transaction validity: {0:?}")]
+	/// Transaction is invalid.
+	#[display(fmt="Invalid transaction validity: {:?}", _0)]
 	InvalidTransaction(InvalidTransaction),
-
 	/// The transaction validity returned no "provides" tag.
 	///
 	/// Such transactions are not accepted to the pool, since we use those tags
 	/// to define identity of transactions (occupance of the same "slot").
-	#[error("Transaction does not provide any tags, so the pool can't identify it")]
+	#[display(fmt="The transaction does not provide any tags, so the pool can't identify it.")]
 	NoTagsProvided,
-
-	#[error("Transaction temporarily Banned")]
+	/// The transaction is temporarily banned.
+	#[display(fmt="Temporarily Banned")]
 	TemporarilyBanned,
-
-	#[error("[{0:?}] Already imported")]
+	/// The transaction is already in the pool.
+	#[display(fmt="[{:?}] Already imported", _0)]
 	AlreadyImported(Box<dyn std::any::Any + Send>),
-
-	#[error("Too low priority ({} > {})", old, new)]
+	/// The transaction cannot be imported cause it's a replacement and has too low priority.
+	#[display(fmt="Too low priority ({} > {})", old, new)]
 	TooLowPriority {
 		/// Transaction already in the pool.
 		old: Priority,
 		/// Transaction entering the pool.
 		new: Priority
 	},
-	#[error("Transaction with cyclic dependency")]
+	/// Deps cycle detected and we couldn't import transaction.
+	#[display(fmt="Cycle Detected")]
 	CycleDetected,
-
-	#[error("Transaction couldn't enter the pool because of the limit")]
+	/// Transaction was dropped immediately after it got inserted.
+	#[display(fmt="Transaction couldn't enter the pool because of the limit.")]
 	ImmediatelyDropped,
-
-	#[from(ignore)]
-	#[error("{0}")]
+	/// Invalid block id.
 	InvalidBlockId(String),
-
-	#[error("The pool is not accepting future transactions")]
+	/// The pool is not accepting future transactions.
+	#[display(fmt="The pool is not accepting future transactions")]
 	RejectedFutureTransaction,
 }
+
+impl std::error::Error for Error {}
 
 /// Transaction pool error conversion.
 pub trait IntoPoolError: std::error::Error + Send + Sized {
