@@ -42,9 +42,11 @@ use sp_runtime::{
 	},
 	traits::{
 		BlindCheckable, BlakeTwo256, Block as BlockT, Extrinsic as ExtrinsicT,
-		GetNodeBlockType, GetRuntimeBlockType, NumberFor, Verify, IdentityLookup,
+		GetNodeBlockType, GetRuntimeBlockType, Verify, IdentityLookup,
 	},
 };
+#[cfg(feature = "std")]
+use sp_runtime::traits::NumberFor;
 use sp_version::RuntimeVersion;
 pub use sp_core::hash::H256;
 #[cfg(any(feature = "std", test))]
@@ -52,8 +54,9 @@ use sp_version::NativeVersion;
 use frame_support::{
 	impl_outer_origin, parameter_types,
 	traits::KeyOwnerProofSystem,
-	weights::{RuntimeDbWeight, Weight},
+	weights::RuntimeDbWeight,
 };
+use frame_system::limits::{BlockWeights, BlockLength};
 use sp_inherents::{CheckInherentsResult, InherentData};
 use cfg_if::cfg_if;
 
@@ -66,8 +69,8 @@ pub type AuraId = sp_consensus_aura::sr25519::AuthorityId;
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+/// Wasm binary unwrapped. If built with `SKIP_WASM_BUILD`, the function panics.
 #[cfg(feature = "std")]
-/// Wasm binary unwrapped. If built with `BUILD_DUMMY_WASM_BINARY`, the function panics.
 pub fn wasm_binary_unwrap() -> &'static [u8] {
 	WASM_BINARY.expect("Development wasm binary is not available. Testing is only \
 						supported with the flag disabled.")
@@ -197,7 +200,7 @@ impl ExtrinsicT for Extrinsic {
 
 impl sp_runtime::traits::Dispatchable for Extrinsic {
 	type Origin = Origin;
-	type Trait = ();
+	type Config = ();
 	type Info = ();
 	type PostInfo = ();
 	fn dispatch(self, _origin: Self::Origin) -> sp_runtime::DispatchResultWithInfo<Self::PostInfo> {
@@ -340,6 +343,8 @@ cfg_if! {
 				/// Test that ensures that we can call a function that takes multiple
 				/// arguments.
 				fn test_multiple_arguments(data: Vec<u8>, other: Vec<u8>, num: u32);
+				/// Traces log "Hey I'm runtime."
+				fn do_trace_log();
 			}
 		}
 	} else {
@@ -391,6 +396,8 @@ cfg_if! {
 				/// Test that ensures that we can call a function that takes multiple
 				/// arguments.
 				fn test_multiple_arguments(data: Vec<u8>, other: Vec<u8>, num: u32);
+				/// Traces log "Hey I'm runtime."
+				fn do_trace_log();
 			}
 		}
 	}
@@ -423,17 +430,20 @@ impl From<frame_system::Event<Runtime>> for Event {
 parameter_types! {
 	pub const BlockHashCount: BlockNumber = 2400;
 	pub const MinimumPeriod: u64 = 5;
-	pub const MaximumBlockWeight: Weight = 4 * 1024 * 1024;
 	pub const DbWeight: RuntimeDbWeight = RuntimeDbWeight {
 		read: 100,
 		write: 1000,
 	};
-	pub const MaximumBlockLength: u32 = 4 * 1024 * 1024;
-	pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
+	pub RuntimeBlockLength: BlockLength =
+		BlockLength::max(4 * 1024 * 1024);
+	pub RuntimeBlockWeights: BlockWeights =
+		BlockWeights::with_sensible_defaults(4 * 1024 * 1024, Perbill::from_percent(75));
 }
 
-impl frame_system::Trait for Runtime {
+impl frame_system::Config for Runtime {
 	type BaseCallFilter = ();
+	type BlockWeights = RuntimeBlockWeights;
+	type BlockLength = RuntimeBlockLength;
 	type Origin = Origin;
 	type Call = Extrinsic;
 	type Index = u64;
@@ -445,13 +455,7 @@ impl frame_system::Trait for Runtime {
 	type Header = Header;
 	type Event = Event;
 	type BlockHashCount = BlockHashCount;
-	type MaximumBlockWeight = MaximumBlockWeight;
 	type DbWeight = ();
-	type BlockExecutionWeight = ();
-	type ExtrinsicBaseWeight = ();
-	type MaximumExtrinsicWeight = MaximumBlockWeight;
-	type MaximumBlockLength = MaximumBlockLength;
-	type AvailableBlockRatio = AvailableBlockRatio;
 	type Version = ();
 	type PalletInfo = ();
 	type AccountData = ();
@@ -460,7 +464,7 @@ impl frame_system::Trait for Runtime {
 	type SystemWeightInfo = ();
 }
 
-impl pallet_timestamp::Trait for Runtime {
+impl pallet_timestamp::Config for Runtime {
 	/// A timestamp: milliseconds since the unix epoch.
 	type Moment = u64;
 	type OnTimestampSet = ();
@@ -473,7 +477,7 @@ parameter_types! {
 	pub const ExpectedBlockTime: u64 = 10_000;
 }
 
-impl pallet_babe::Trait for Runtime {
+impl pallet_babe::Config for Runtime {
 	type EpochDuration = EpochDuration;
 	type ExpectedBlockTime = ExpectedBlockTime;
 	// there is no actual runtime in this test-runtime, so testing crates
@@ -697,6 +701,11 @@ cfg_if! {
 				fn test_multiple_arguments(data: Vec<u8>, other: Vec<u8>, num: u32) {
 					assert_eq!(&data[..], &other[..]);
 					assert_eq!(data.len(), num as usize);
+				}
+
+				fn do_trace_log() {
+					frame_support::debug::RuntimeLogger::init();
+					frame_support::debug::trace!("Hey I'm runtime");
 				}
 			}
 
@@ -943,6 +952,11 @@ cfg_if! {
 				fn test_multiple_arguments(data: Vec<u8>, other: Vec<u8>, num: u32) {
 					assert_eq!(&data[..], &other[..]);
 					assert_eq!(data.len(), num as usize);
+				}
+
+				fn do_trace_log() {
+					frame_support::debug::RuntimeLogger::init();
+					frame_support::debug::trace!("Hey I'm runtime");
 				}
 			}
 

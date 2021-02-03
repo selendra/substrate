@@ -188,10 +188,10 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 	///
 	/// Bu default this is retrieved from `KeystoreParams` if it is available. Otherwise it uses
 	/// `KeystoreConfig::InMemory`.
-	fn keystore_config(&self, base_path: &PathBuf) -> Result<KeystoreConfig> {
+	fn keystore_config(&self, base_path: &PathBuf) -> Result<(Option<String>, KeystoreConfig)> {
 		self.keystore_params()
 			.map(|x| x.keystore_config(base_path))
-			.unwrap_or(Ok(KeystoreConfig::InMemory))
+			.unwrap_or_else(|| Ok((None, KeystoreConfig::InMemory)))
 	}
 
 	/// Get the database cache size.
@@ -276,6 +276,15 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 		Ok(self.import_params()
 			.map(|x| x.wasm_method())
 			.unwrap_or_default())
+	}
+
+	/// Get the path where WASM overrides live.
+	///
+	/// By default this is `None`.
+	fn wasm_runtime_overrides(&self) -> Option<PathBuf> {
+		self.import_params()
+			.map(|x| x.wasm_runtime_overrides())
+			.unwrap_or_default()
 	}
 
 	/// Get the execution strategies.
@@ -399,22 +408,18 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 
 	/// Get the tracing targets from the current object (if any)
 	///
-	/// By default this is retrieved from `ImportParams` if it is available. Otherwise its
+	/// By default this is retrieved from [`SharedParams`] if it is available. Otherwise its
 	/// `None`.
 	fn tracing_targets(&self) -> Result<Option<String>> {
-		Ok(self.import_params()
-			.map(|x| x.tracing_targets())
-			.unwrap_or_else(|| Default::default()))
+		Ok(self.shared_params().tracing_targets())
 	}
 
 	/// Get the TracingReceiver value from the current object
 	///
-	/// By default this is retrieved from `ImportParams` if it is available. Otherwise its
+	/// By default this is retrieved from [`SharedParams`] if it is available. Otherwise its
 	/// `TracingReceiver::default()`.
 	fn tracing_receiver(&self) -> Result<TracingReceiver> {
-		Ok(self.import_params()
-			.map(|x| x.tracing_receiver())
-			.unwrap_or_default())
+		Ok(self.shared_params().tracing_receiver())
 	}
 
 	/// Get the node key from the current object
@@ -466,6 +471,7 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 		let role = self.role(is_dev)?;
 		let max_runtime_instances = self.max_runtime_instances()?.unwrap_or(8);
 		let is_validator = role.is_network_authority();
+		let (keystore_remote, keystore) = self.keystore_config(&config_dir)?;
 
 		let unsafe_pruning = self
 			.import_params()
@@ -486,12 +492,14 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 				node_key,
 				DCV::p2p_listen_port(),
 			)?,
-			keystore: self.keystore_config(&config_dir)?,
+			keystore_remote,
+			keystore,
 			database: self.database_config(&config_dir, database_cache_size, database)?,
 			state_cache_size: self.state_cache_size()?,
 			state_cache_child_ratio: self.state_cache_child_ratio()?,
 			pruning: self.pruning(unsafe_pruning, &role)?,
 			wasm_method: self.wasm_method()?,
+			wasm_runtime_overrides: self.wasm_runtime_overrides(),
 			execution_strategies: self.execution_strategies(is_dev, is_validator)?,
 			rpc_http: self.rpc_http(DCV::rpc_http_listen_port())?,
 			rpc_ws: self.rpc_ws(DCV::rpc_ws_listen_port())?,
@@ -509,6 +517,7 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 			dev_key_seed: self.dev_key_seed(is_dev)?,
 			tracing_targets: self.tracing_targets()?,
 			tracing_receiver: self.tracing_receiver()?,
+			disable_log_reloading: self.is_log_filter_reloading_disabled()?,
 			chain_spec,
 			max_runtime_instances,
 			announce_block: self.announce_block()?,
@@ -528,6 +537,11 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 		Ok(self.shared_params().log_filters().join(","))
 	}
 
+	/// Is log reloading disabled (enabled by default)
+	fn is_log_filter_reloading_disabled(&self) -> Result<bool> {
+		Ok(self.shared_params().is_log_filter_reloading_disabled())
+	}
+
 	/// Initialize substrate. This must be done only once per process.
 	///
 	/// This method:
@@ -539,12 +553,16 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 		let logger_pattern = self.log_filters()?;
 		let tracing_receiver = self.tracing_receiver()?;
 		let tracing_targets = self.tracing_targets()?;
+		let disable_log_reloading = self.is_log_filter_reloading_disabled()?;
 
 		sp_panic_handler::set(&C::support_url(), &C::impl_version());
 
-		if let Err(e) = init_logger(&logger_pattern, tracing_receiver, tracing_targets) {
-			log::warn!("💬 Problem initializing global logging framework: {:}", e)
-		}
+		init_logger(
+			&logger_pattern,
+			tracing_receiver,
+			tracing_targets,
+			disable_log_reloading,
+		)?;
 
 		if let Some(new_limit) = fdlimit::raise_fd_limit() {
 			if new_limit < RECOMMENDED_OPEN_FILE_DESCRIPTOR_LIMIT {

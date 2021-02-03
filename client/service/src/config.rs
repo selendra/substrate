@@ -50,6 +50,8 @@ pub struct Configuration {
 	pub network: NetworkConfiguration,
 	/// Configuration for the keystore.
 	pub keystore: KeystoreConfig,
+	/// Remote URI to connect to for async keystore support
+	pub keystore_remote: Option<String>,
 	/// Configuration for the database.
 	pub database: DatabaseConfig,
 	/// Size of internal state cache in Bytes
@@ -62,6 +64,10 @@ pub struct Configuration {
 	pub chain_spec: Box<dyn ChainSpec>,
 	/// Wasm execution method.
 	pub wasm_method: WasmExecutionMethod,
+	/// Directory where local WASM runtimes live. These runtimes take precedence
+	/// over on-chain runtimes when the spec version matches. Set to `None` to
+	/// disable overrides (default).
+	pub wasm_runtime_overrides: Option<PathBuf>,
 	/// Execution strategies.
 	pub execution_strategies: ExecutionStrategies,
 	/// RPC over HTTP binding address. `None` if disabled.
@@ -99,6 +105,8 @@ pub struct Configuration {
 	pub dev_key_seed: Option<String>,
 	/// Tracing targets
 	pub tracing_targets: Option<String>,
+	/// Is log filter reloading disabled
+	pub disable_log_reloading: bool,
 	/// Tracing receiver
 	pub tracing_receiver: sc_tracing::TracingReceiver,
 	/// The size of the instances cache.
