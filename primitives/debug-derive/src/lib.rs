@@ -34,7 +34,7 @@
 
 mod impls;
 
-use proc_macro::TokenStream;
+use proc_macro2::TokenStream;
 
 #[proc_macro_derive(RuntimeDebug)]
 pub fn debug_derive(input: TokenStream) -> TokenStream {
