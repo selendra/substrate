@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "frame-benchmarking"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -4599,7 +4599,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts"
-version = "2.0.1"
+version = "3.0.0"
 dependencies = [
  "assert_matches",
  "frame-benchmarking",
@@ -4630,7 +4630,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-primitives"
-version = "2.0.1"
+version = "3.0.0"
 dependencies = [
  "bitflags",
  "parity-scale-codec",
@@ -4640,7 +4640,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-proc-macro"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4649,7 +4649,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-rpc"
-version = "0.8.1"
+version = "3.0.0"
 dependencies = [
  "jsonrpc-core",
  "jsonrpc-core-client",
@@ -4668,7 +4668,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-contracts-rpc-runtime-api"
-version = "0.8.1"
+version = "3.0.0"
 dependencies = [
  "pallet-contracts-primitives",
  "parity-scale-codec",
@@ -6436,12 +6436,12 @@ name = "remote-externalities"
 version = "0.9.0"
 dependencies = [
  "async-std",
- "bincode",
  "env_logger 0.8.2",
- "futures 0.1.30",
+ "futures 0.3.12",
  "hex-literal",
  "jsonrpc-core-client",
  "log",
+ "parity-scale-codec",
  "sc-rpc",
  "sc-rpc-api",
  "sp-core",
@@ -6691,7 +6691,6 @@ dependencies = [
  "sp-api",
  "sp-block-builder",
  "sp-blockchain",
- "sp-consensus",
  "sp-core",
  "sp-inherents",
  "sp-runtime",
@@ -7255,18 +7254,25 @@ name = "sc-finality-grandpa-warp-sync"
 version = "0.9.0"
 dependencies = [
  "derive_more",
+ "finality-grandpa",
  "futures 0.3.12",
  "log",
  "num-traits",
  "parity-scale-codec",
  "parking_lot 0.11.1",
  "prost",
+ "rand 0.8.3",
+ "sc-block-builder",
  "sc-client-api",
  "sc-finality-grandpa",
  "sc-network",
  "sc-service",
  "sp-blockchain",
+ "sp-consensus",
+ "sp-finality-grandpa",
+ "sp-keyring",
  "sp-runtime",
+ "substrate-test-runtime-client",
 ]
 
 [[package]]
@@ -9831,9 +9837,9 @@ checksum = "360dfd1d6d30e05fda32ace2c8c70e9c0a9da713275777f5a4dbb8a1893930c6"
 
 [[package]]
 name = "tracing"
-version = "0.1.22"
+version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f47026cdc4080c07e49b37087de021820269d996f581aac150ef9e5583eefe3"
+checksum = "01ebdc2bb4498ab1ab5f5b73c5803825e60199229ccba0698170e3be0e7f959f"
 dependencies = [
  "cfg-if 1.0.0",
  "log",
@@ -9844,9 +9850,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.11"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80e0ccfc3378da0cce270c946b676a376943f5cd16aeba64568e7939806f4ada"
+checksum = "a8a9bd1db7706f2373a190b0d067146caa39350c486f3d455b0e33b431f94c07"
 dependencies = [
  "proc-macro2",
  "quote",
