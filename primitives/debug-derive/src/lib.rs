@@ -31,14 +31,8 @@
 //!
 //! assert_eq!(format!("{:?}", MyStruct), "MyStruct");
 //! ```
+
 mod impls;
-
-use proc_macro::TokenStream;
-
-#[proc_macro_derive(RuntimeDebug)]
-pub fn debug_derive(input: TokenStream) -> TokenStream {
-   impls::debug_derive(syn::parse_macro_input!(input))
-}
 
 use proc_macro::TokenStream;
 
