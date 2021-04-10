@@ -47,10 +47,8 @@ fn build_test_full_node(config: config::NetworkConfiguration)
 
 	#[derive(Clone)]
 	struct PassThroughVerifier(bool);
-
-	#[async_trait::async_trait]
 	impl<B: BlockT> sp_consensus::import_queue::Verifier<B> for PassThroughVerifier {
-		async fn verify(
+		fn verify(
 			&mut self,
 			origin: sp_consensus::BlockOrigin,
 			header: B::Header,

@@ -82,12 +82,11 @@ pub struct IncomingBlock<B: BlockT> {
 pub type CacheKeyId = [u8; 4];
 
 /// Verify a justification of a block
-#[async_trait::async_trait]
 pub trait Verifier<B: BlockT>: Send + Sync {
 	/// Verify the given data and return the BlockImportParams and an optional
 	/// new set of validators to import. If not, err with an Error-Message
 	/// presented to the User in the logs.
-	async fn verify(
+	fn verify(
 		&mut self,
 		origin: BlockOrigin,
 		header: B::Header,
@@ -164,18 +163,18 @@ pub enum BlockImportError {
 }
 
 /// Single block import function.
-pub async fn import_single_block<B: BlockT, V: Verifier<B>, Transaction: Send + 'static>(
-	import_handle: &mut impl BlockImport<B, Transaction = Transaction, Error = ConsensusError>,
+pub fn import_single_block<B: BlockT, V: Verifier<B>, Transaction>(
+	import_handle: &mut dyn BlockImport<B, Transaction = Transaction, Error = ConsensusError>,
 	block_origin: BlockOrigin,
 	block: IncomingBlock<B>,
 	verifier: &mut V,
 ) -> Result<BlockImportResult<NumberFor<B>>, BlockImportError> {
-	import_single_block_metered(import_handle, block_origin, block, verifier, None).await
+	import_single_block_metered(import_handle, block_origin, block, verifier, None)
 }
 
 /// Single block import function with metering.
-pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>, Transaction: Send + 'static>(
-	import_handle: &mut impl BlockImport<B, Transaction = Transaction, Error = ConsensusError>,
+pub(crate) fn import_single_block_metered<B: BlockT, V: Verifier<B>, Transaction>(
+	import_handle: &mut dyn BlockImport<B, Transaction = Transaction, Error = ConsensusError>,
 	block_origin: BlockOrigin,
 	block: IncomingBlock<B>,
 	verifier: &mut V,
@@ -233,28 +232,24 @@ pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>, Trans
 		parent_hash,
 		allow_missing_state: block.allow_missing_state,
 		import_existing: block.import_existing,
-	}).await)? {
+	}))? {
 		BlockImportResult::ImportedUnknown { .. } => (),
 		r => return Ok(r), // Any other successful result means that the block is already imported.
 	}
 
 	let started = wasm_timer::Instant::now();
-	let (mut import_block, maybe_keys) = verifier.verify(
-		block_origin,
-		header,
-		justifications,
-		block.body
-	).await.map_err(|msg| {
-		if let Some(ref peer) = peer {
-			trace!(target: "sync", "Verifying {}({}) from {} failed: {}", number, hash, peer, msg);
-		} else {
-			trace!(target: "sync", "Verifying {}({}) failed: {}", number, hash, msg);
-		}
-		if let Some(metrics) = metrics.as_ref() {
-			metrics.report_verification(false, started.elapsed());
-		}
-		BlockImportError::VerificationFailed(peer.clone(), msg)
-	})?;
+	let (mut import_block, maybe_keys) = verifier.verify(block_origin, header, justifications, block.body)
+		.map_err(|msg| {
+			if let Some(ref peer) = peer {
+				trace!(target: "sync", "Verifying {}({}) from {} failed: {}", number, hash, peer, msg);
+			} else {
+				trace!(target: "sync", "Verifying {}({}) failed: {}", number, hash, msg);
+			}
+			if let Some(metrics) = metrics.as_ref() {
+				metrics.report_verification(false, started.elapsed());
+			}
+			BlockImportError::VerificationFailed(peer.clone(), msg)
+		})?;
 
 	if let Some(metrics) = metrics.as_ref() {
 		metrics.report_verification(true, started.elapsed());
@@ -266,7 +261,7 @@ pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>, Trans
 	}
 	import_block.allow_missing_state = block.allow_missing_state;
 
-	let imported = import_handle.import_block(import_block.convert_transaction(), cache).await;
+	let imported = import_handle.import_block(import_block.convert_transaction(), cache);
 	if let Some(metrics) = metrics.as_ref() {
 		metrics.report_verification_and_import(started.elapsed());
 	}

@@ -19,17 +19,17 @@
 //! Utilities for dealing with authorities, authority sets, and handoffs.
 
 use fork_tree::ForkTree;
-use parking_lot::MappedMutexGuard;
+use parking_lot::RwLock;
 use finality_grandpa::voter_set::VoterSet;
 use parity_scale_codec::{Encode, Decode};
 use log::debug;
 use sc_telemetry::{telemetry, TelemetryHandle, CONSENSUS_INFO};
 use sp_finality_grandpa::{AuthorityId, AuthorityList};
-use sc_consensus::shared_data::{SharedData, SharedDataLocked};
 
 use std::cmp::Ord;
 use std::fmt::Debug;
 use std::ops::Add;
+use std::sync::Arc;
 
 /// Error type returned on operations on the `AuthoritySet`.
 #[derive(Debug, derive_more::Display)]
@@ -70,30 +70,19 @@ impl<N, E: std::error::Error> From<E> for Error<N, E> {
 
 /// A shared authority set.
 pub struct SharedAuthoritySet<H, N> {
-	inner: SharedData<AuthoritySet<H, N>>,
+	inner: Arc<RwLock<AuthoritySet<H, N>>>,
 }
 
 impl<H, N> Clone for SharedAuthoritySet<H, N> {
 	fn clone(&self) -> Self {
-		SharedAuthoritySet {
-			inner: self.inner.clone(),
-		}
+		SharedAuthoritySet { inner: self.inner.clone() }
 	}
 }
 
 impl<H, N> SharedAuthoritySet<H, N> {
-	/// Returns access to the [`AuthoritySet`].
-	pub(crate) fn inner(&self) -> MappedMutexGuard<AuthoritySet<H, N>> {
-		self.inner.shared_data()
-	}
-
-	/// Returns access to the [`AuthoritySet`] and locks it.
-	///
-	/// For more information see [`SharedDataLocked`].
-	pub(crate) fn inner_locked(
-		&self,
-	) -> SharedDataLocked<AuthoritySet<H, N>> {
-		self.inner.shared_data_locked()
+	/// Acquire a reference to the inner read-write lock.
+	pub(crate) fn inner(&self) -> &RwLock<AuthoritySet<H, N>> {
+		&*self.inner
 	}
 }
 
@@ -104,17 +93,17 @@ where N: Add<Output=N> + Ord + Clone + Debug,
 	/// Get the earliest limit-block number that's higher or equal to the given
 	/// min number, if any.
 	pub(crate) fn current_limit(&self, min: N) -> Option<N> {
-		self.inner().current_limit(min)
+		self.inner.read().current_limit(min)
 	}
 
 	/// Get the current set ID. This is incremented every time the set changes.
 	pub fn set_id(&self) -> u64 {
-		self.inner().set_id
+		self.inner.read().set_id
 	}
 
 	/// Get the current authorities and their weights (for the current set ID).
 	pub fn current_authorities(&self) -> VoterSet<AuthorityId> {
-		VoterSet::new(self.inner().current_authorities.iter().cloned()).expect(
+		VoterSet::new(self.inner.read().current_authorities.iter().cloned()).expect(
 			"current_authorities is non-empty and weights are non-zero; \
 			 constructor and all mutating operations on `AuthoritySet` ensure this; \
 			 qed.",
@@ -123,20 +112,18 @@ where N: Add<Output=N> + Ord + Clone + Debug,
 
 	/// Clone the inner `AuthoritySet`.
 	pub fn clone_inner(&self) -> AuthoritySet<H, N> {
-		self.inner().clone()
+		self.inner.read().clone()
 	}
 
 	/// Clone the inner `AuthoritySetChanges`.
 	pub fn authority_set_changes(&self) -> AuthoritySetChanges<N> {
-		self.inner().authority_set_changes.clone()
+		self.inner.read().authority_set_changes.clone()
 	}
 }
 
 impl<H, N> From<AuthoritySet<H, N>> for SharedAuthoritySet<H, N> {
 	fn from(set: AuthoritySet<H, N>) -> Self {
-		SharedAuthoritySet {
-			inner: SharedData::new(set),
-		}
+		SharedAuthoritySet { inner: Arc::new(RwLock::new(set)) }
 	}
 }
 

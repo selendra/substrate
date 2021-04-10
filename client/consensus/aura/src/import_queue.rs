@@ -220,7 +220,6 @@ impl<C, P, CAW> AuraVerifier<C, P, CAW> where
 	}
 }
 
-#[async_trait::async_trait]
 impl<B: BlockT, C, P, CAW> Verifier<B> for AuraVerifier<C, P, CAW> where
 	C: ProvideRuntimeApi<B> +
 		Send +
@@ -235,7 +234,7 @@ impl<B: BlockT, C, P, CAW> Verifier<B> for AuraVerifier<C, P, CAW> where
 	P::Signature: Encode + Decode,
 	CAW: CanAuthorWith<B> + Send + Sync + 'static,
 {
-	async fn verify(
+	fn verify(
 		&mut self,
 		origin: BlockOrigin,
 		header: B::Header,
@@ -406,7 +405,6 @@ impl<Block: BlockT, C, I: BlockImport<Block>, P> AuraBlockImport<Block, C, I, P>
 	}
 }
 
-#[async_trait::async_trait]
 impl<Block: BlockT, C, I, P> BlockImport<Block> for AuraBlockImport<Block, C, I, P> where
 	I: BlockImport<Block, Transaction = sp_api::TransactionFor<C, Block>> + Send + Sync,
 	I::Error: Into<ConsensusError>,
@@ -414,19 +412,18 @@ impl<Block: BlockT, C, I, P> BlockImport<Block> for AuraBlockImport<Block, C, I,
 	P: Pair + Send + Sync + 'static,
 	P::Public: Clone + Eq + Send + Sync + Hash + Debug + Encode + Decode,
 	P::Signature: Encode + Decode,
-	sp_api::TransactionFor<C, Block>: Send + 'static,
 {
 	type Error = ConsensusError;
 	type Transaction = sp_api::TransactionFor<C, Block>;
 
-	async fn check_block(
+	fn check_block(
 		&mut self,
 		block: BlockCheckParams<Block>,
 	) -> Result<ImportResult, Self::Error> {
-		self.inner.check_block(block).await.map_err(Into::into)
+		self.inner.check_block(block).map_err(Into::into)
 	}
 
-	async fn import_block(
+	fn import_block(
 		&mut self,
 		block: BlockImportParams<Block, Self::Transaction>,
 		new_cache: HashMap<CacheKeyId, Vec<u8>>,
@@ -456,7 +453,7 @@ impl<Block: BlockT, C, I, P> BlockImport<Block> for AuraBlockImport<Block, C, I,
 			);
 		}
 
-		self.inner.import_block(block, new_cache).await.map_err(Into::into)
+		self.inner.import_block(block, new_cache).map_err(Into::into)
 	}
 }
 

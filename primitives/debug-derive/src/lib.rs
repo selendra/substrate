@@ -40,3 +40,4 @@ use proc_macro::TokenStream;
 pub fn debug_derive(input: TokenStream) -> TokenStream {
    impls::debug_derive(syn::parse_macro_input!(input))
 }
+

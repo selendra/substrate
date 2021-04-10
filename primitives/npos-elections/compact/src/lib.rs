@@ -52,14 +52,8 @@ pub(crate) fn syn_err(message: &'static str) -> syn::Error {
 /// For example, the following generates a public struct with name `TestSolution` with `u16` voter
 /// type, `u8` target type and `Perbill` accuracy with maximum of 8 edges per voter.
 ///
-/// ```
-/// # use sp_npos_elections_compact::generate_solution_type;
-/// # use sp_arithmetic::per_things::Perbill;
-/// generate_solution_type!(pub struct TestSolution::<
-/// 	VoterIndex = u16,
-/// 	TargetIndex = u8,
-/// 	Accuracy = Perbill,
-/// >(8));
+/// ```ignore
+/// generate_solution_type!(pub struct TestSolution<u16, u8, Perbill>::(8))
 /// ```
 ///
 /// The given struct provides function to convert from/to Assignment:
@@ -71,13 +65,11 @@ pub(crate) fn syn_err(message: &'static str) -> syn::Error {
 /// lead to many 0s in the solution. If prefixed with `#[compact]`, then a custom compact encoding
 /// for numbers will be used, similar to how `parity-scale-codec`'s `Compact` works.
 ///
-/// ```
-/// # use sp_npos_elections_compact::generate_solution_type;
-/// # use sp_arithmetic::per_things::Perbill;
+/// ```ignore
 /// generate_solution_type!(
 ///     #[compact]
-///     pub struct TestSolutionCompact::<VoterIndex = u16, TargetIndex = u8, Accuracy = Perbill>(8)
-/// );
+///     pub struct TestSolutionCompact<u16, u8, Perbill>::(8)
+/// )
 /// ```
 #[proc_macro]
 pub fn generate_solution_type(item: TokenStream) -> TokenStream {
@@ -394,7 +386,7 @@ fn check_compact_attr(input: ParseStream) -> Result<bool> {
 	}
 }
 
-/// #[compact] pub struct CompactName::<VoterIndex = u32, TargetIndex = u32, Accuracy = u32>()
+/// #[compact] pub struct CompactName::<u32, u32, u32>()
 impl Parse for SolutionDef {
 	fn parse(input: ParseStream) -> syn::Result<Self> {
 		// optional #[compact]
@@ -413,22 +405,9 @@ impl Parse for SolutionDef {
 			return Err(syn_err("Must provide 3 generic args."))
 		}
 
-		let expected_types = ["VoterIndex", "TargetIndex", "Accuracy"];
-
-		let mut types: Vec<syn::Type> = generics.args.iter().zip(expected_types.iter()).map(|(t, expected)|
+		let mut types: Vec<syn::Type> = generics.args.iter().map(|t|
 			match t {
-				syn::GenericArgument::Type(ty) => {
-					// this is now an error
-					Err(syn::Error::new_spanned(ty, format!("Expected binding: `{} = ...`", expected)))
-				},
-				syn::GenericArgument::Binding(syn::Binding{ident, ty, ..}) => {
-					// check that we have the right keyword for this position in the argument list
-					if ident == expected {
-						Ok(ty.clone())
-					} else {
-						Err(syn::Error::new_spanned(ident, format!("Expected `{}`", expected)))
-					}
-				}
+				syn::GenericArgument::Type(ty) => Ok(ty.clone()),
 				_ => Err(syn_err("Wrong type of generic provided. Must be a `type`.")),
 			}
 		).collect::<Result<_>>()?;
@@ -456,13 +435,4 @@ impl Parse for SolutionDef {
 
 fn field_name_for(n: usize) -> Ident {
 	Ident::new(&format!("{}{}", PREFIX, n), Span::call_site())
-}
-
-#[cfg(test)]
-mod tests {
-	#[test]
-	fn ui_fail() {
-		let cases = trybuild::TestCases::new();
-		cases.compile_fail("tests/ui/fail/*.rs");
-	}
 }

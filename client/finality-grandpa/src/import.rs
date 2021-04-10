@@ -20,13 +20,13 @@ use std::{sync::Arc, collections::HashMap};
 
 use log::debug;
 use parity_scale_codec::Encode;
+use parking_lot::RwLockWriteGuard;
 
 use sp_blockchain::{BlockStatus, well_known_cache_keys};
 use sc_client_api::{backend::Backend, utils::is_descendent_of};
 use sc_telemetry::TelemetryHandle;
 use sp_utils::mpsc::TracingUnboundedSender;
 use sp_api::TransactionFor;
-use sc_consensus::shared_data::{SharedDataLockedUpgradable, SharedDataLocked};
 
 use sp_consensus::{
 	BlockImport, Error as ConsensusError,
@@ -99,7 +99,7 @@ impl<BE, Block: BlockT, Client, SC> JustificationImport<Block>
 		let chain_info = self.inner.info();
 
 		// request justifications for all pending changes for which change blocks have already been imported
-		let authorities = self.authority_set.inner();
+		let authorities = self.authority_set.inner().read();
 		for pending_change in authorities.pending_changes() {
 			if pending_change.delay_kind == DelayKind::Finalized &&
 				pending_change.effective_number() > chain_info.finalized_number &&
@@ -157,30 +157,30 @@ impl<H, N> AppliedChanges<H, N> {
 	}
 }
 
-struct PendingSetChanges<Block: BlockT> {
+struct PendingSetChanges<'a, Block: 'a + BlockT> {
 	just_in_case: Option<(
 		AuthoritySet<Block::Hash, NumberFor<Block>>,
-		SharedDataLockedUpgradable<AuthoritySet<Block::Hash, NumberFor<Block>>>,
+		RwLockWriteGuard<'a, AuthoritySet<Block::Hash, NumberFor<Block>>>,
 	)>,
 	applied_changes: AppliedChanges<Block::Hash, NumberFor<Block>>,
 	do_pause: bool,
 }
 
-impl<Block: BlockT> PendingSetChanges<Block> {
+impl<'a, Block: 'a + BlockT> PendingSetChanges<'a, Block> {
 	// revert the pending set change explicitly.
-	fn revert(self) {}
+	fn revert(self) { }
 
 	fn defuse(mut self) -> (AppliedChanges<Block::Hash, NumberFor<Block>>, bool) {
 		self.just_in_case = None;
-		let applied_changes = std::mem::replace(&mut self.applied_changes, AppliedChanges::None);
+		let applied_changes = ::std::mem::replace(&mut self.applied_changes, AppliedChanges::None);
 		(applied_changes, self.do_pause)
 	}
 }
 
-impl<Block: BlockT> Drop for PendingSetChanges<Block> {
+impl<'a, Block: 'a + BlockT> Drop for PendingSetChanges<'a, Block> {
 	fn drop(&mut self) {
 		if let Some((old_set, mut authorities)) = self.just_in_case.take() {
-			*authorities.upgrade() = old_set;
+			*authorities = old_set;
 		}
 	}
 }
@@ -269,38 +269,33 @@ where
 		// when we update the authorities, we need to hold the lock
 		// until the block is written to prevent a race if we need to restore
 		// the old authority set on error or panic.
-		struct InnerGuard<'a, H, N> {
-			old: Option<AuthoritySet<H, N>>,
-			guard: Option<SharedDataLocked<'a, AuthoritySet<H, N>>>,
+		struct InnerGuard<'a, T: 'a> {
+			old: Option<T>,
+			guard: Option<RwLockWriteGuard<'a, T>>,
 		}
 
-		impl<'a, H, N> InnerGuard<'a, H, N> {
-			fn as_mut(&mut self) -> &mut AuthoritySet<H, N> {
+		impl<'a, T: 'a> InnerGuard<'a, T> {
+			fn as_mut(&mut self) -> &mut T {
 				&mut **self.guard.as_mut().expect("only taken on deconstruction; qed")
 			}
 
-			fn set_old(&mut self, old: AuthoritySet<H, N>) {
+			fn set_old(&mut self, old: T) {
 				if self.old.is_none() {
 					// ignore "newer" old changes.
 					self.old = Some(old);
 				}
 			}
 
-			fn consume(
-				mut self,
-			) -> Option<(AuthoritySet<H, N>, SharedDataLocked<'a, AuthoritySet<H, N>>)> {
+			fn consume(mut self) -> Option<(T, RwLockWriteGuard<'a, T>)> {
 				if let Some(old) = self.old.take() {
-					Some((
-						old,
-						self.guard.take().expect("only taken on deconstruction; qed"),
-					))
+					Some((old, self.guard.take().expect("only taken on deconstruction; qed")))
 				} else {
 					None
 				}
 			}
 		}
 
-		impl<'a, H, N> Drop for InnerGuard<'a, H, N> {
+		impl<'a, T: 'a> Drop for InnerGuard<'a, T> {
 			fn drop(&mut self) {
 				if let (Some(mut guard), Some(old)) = (self.guard.take(), self.old.take()) {
 					*guard = old;
@@ -320,7 +315,7 @@ where
 		let is_descendent_of = is_descendent_of(&*self.inner, Some((hash, parent_hash)));
 
 		let mut guard = InnerGuard {
-			guard: Some(self.authority_set.inner_locked()),
+			guard: Some(self.authority_set.inner().write()),
 			old: None,
 		};
 
@@ -418,13 +413,10 @@ where
 			);
 		}
 
-		let just_in_case = just_in_case.map(|(o, i)| (o, i.release_mutex()));
-
 		Ok(PendingSetChanges { just_in_case, applied_changes, do_pause })
 	}
 }
 
-#[async_trait::async_trait]
 impl<BE, Block: BlockT, Client, SC> BlockImport<Block>
 	for GrandpaBlockImport<BE, Block, Client, SC> where
 		NumberFor<Block>: finality_grandpa::BlockNumberOps,
@@ -433,13 +425,11 @@ impl<BE, Block: BlockT, Client, SC> BlockImport<Block>
 		Client: crate::ClientForGrandpa<Block, BE>,
 		for<'a> &'a Client:
 			BlockImport<Block, Error = ConsensusError, Transaction = TransactionFor<Client, Block>>,
-		TransactionFor<Client, Block>: Send + 'static,
-		SC: Send,
 {
 	type Error = ConsensusError;
 	type Transaction = TransactionFor<Client, Block>;
 
-	async fn import_block(
+	fn import_block(
 		&mut self,
 		mut block: BlockImportParams<Block, Self::Transaction>,
 		new_cache: HashMap<well_known_cache_keys::Id, Vec<u8>>,
@@ -462,7 +452,7 @@ impl<BE, Block: BlockT, Client, SC> BlockImport<Block>
 
 		// we don't want to finalize on `inner.import_block`
 		let mut justifications = block.justifications.take();
-		let import_result = (&*self.inner).import_block(block, new_cache).await;
+		let import_result = (&*self.inner).import_block(block, new_cache);
 
 		let mut imported_aux = {
 			match import_result {
@@ -566,11 +556,11 @@ impl<BE, Block: BlockT, Client, SC> BlockImport<Block>
 		Ok(ImportResult::Imported(imported_aux))
 	}
 
-	async fn check_block(
+	fn check_block(
 		&mut self,
 		block: BlockCheckParams<Block>,
 	) -> Result<ImportResult, Self::Error> {
-		self.inner.check_block(block).await
+		self.inner.check_block(block)
 	}
 }
 
@@ -590,7 +580,8 @@ impl<Backend, Block: BlockT, Client, SC> GrandpaBlockImport<Backend, Block, Clie
 			.iter()
 			.find(|(set_id, _)| *set_id == authority_set.set_id())
 		{
-			authority_set.inner().current_authorities = change.next_authorities.clone();
+			let mut authority_set = authority_set.inner().write();
+			authority_set.current_authorities = change.next_authorities.clone();
 		}
 
 		// index authority set hard forks by block hash so that they can be used
@@ -605,7 +596,7 @@ impl<Backend, Block: BlockT, Client, SC> GrandpaBlockImport<Backend, Block, Clie
 		// any *pending* standard changes, checking by the block hash at which
 		// they were announced.
 		{
-			let mut authority_set = authority_set.inner();
+			let mut authority_set = authority_set.inner().write();
 
 			authority_set.pending_standard_changes = authority_set
 				.pending_standard_changes

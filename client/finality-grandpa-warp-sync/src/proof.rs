@@ -237,7 +237,7 @@ mod tests {
 				block.header.digest_mut().logs.push(digest);
 			}
 
-			futures::executor::block_on(client.import(BlockOrigin::Own, block)).unwrap();
+			client.import(BlockOrigin::Own, block).unwrap();
 
 			if let Some(new_authorities) = new_authorities {
 				// generate a justification for this block, finalize it and note the authority set

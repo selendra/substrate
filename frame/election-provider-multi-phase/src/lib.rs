@@ -381,11 +381,11 @@ impl Default for ElectionCompute {
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
 pub struct RawSolution<C> {
 	/// Compact election edges.
-	pub compact: C,
+	compact: C,
 	/// The _claimed_ score of the solution.
-	pub score: ElectionScore,
+	score: ElectionScore,
 	/// The round at which this solution should be submitted.
-	pub round: u32,
+	round: u32,
 }
 
 impl<C: Default> Default for RawSolution<C> {
@@ -402,13 +402,13 @@ pub struct ReadySolution<A> {
 	///
 	/// This is target-major vector, storing each winners, total backing, and each individual
 	/// backer.
-	pub supports: Supports<A>,
+	supports: Supports<A>,
 	/// The score of the solution.
 	///
 	/// This is needed to potentially challenge the solution.
-	pub score: ElectionScore,
+	score: ElectionScore,
 	/// How this election was computed.
-	pub compute: ElectionCompute,
+	compute: ElectionCompute,
 }
 
 /// A snapshot of all the data that is needed for en entire round. They are provided by
@@ -432,10 +432,10 @@ pub struct RoundSnapshot<A> {
 pub struct SolutionOrSnapshotSize {
 	/// The length of voters.
 	#[codec(compact)]
-	pub voters: u32,
+	voters: u32,
 	/// The length of targets.
 	#[codec(compact)]
-	pub targets: u32,
+	targets: u32,
 }
 
 /// Internal errors of the pallet.

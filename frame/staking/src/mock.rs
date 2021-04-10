@@ -269,8 +269,6 @@ where
 }
 
 pub type Extrinsic = TestXt<Call, ()>;
-pub(crate) type StakingCall = crate::Call<Test>;
-pub(crate) type TestRuntimeCall = <Test as frame_system::Config>::Call;
 
 pub struct ExtBuilder {
 	validator_pool: bool,
