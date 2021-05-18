@@ -87,14 +87,14 @@ use sp_core::{ChangesTrieConfiguration, storage::well_known_keys};
 use frame_support::{
 	Parameter, storage,
 	traits::{
-		Contains, Get, PalletInfo, OnNewAccount, OnKilledAccount, HandleLifetime,
+		SortedMembers, Get, PalletInfo, OnNewAccount, OnKilledAccount, HandleLifetime,
 		StoredMap, EnsureOrigin, OriginTrait, Filter,
 	},
 	weights::{
 		Weight, RuntimeDbWeight, DispatchInfo, DispatchClass,
 		extract_actual_weight, PerDispatchClass,
 	},
-	dispatch::DispatchResultWithPostInfo,
+	dispatch::{DispatchResultWithPostInfo, DispatchResult},
 };
 use codec::{Encode, Decode, FullCodec, EncodeLike};
 
@@ -139,6 +139,19 @@ pub fn extrinsics_data_root<H: Hash>(xts: Vec<Vec<u8>>) -> H::Output {
 pub type ConsumedWeight = PerDispatchClass<Weight>;
 
 pub use pallet::*;
+
+/// Do something when we should be setting the code.
+pub trait SetCode {
+	/// Set the code to the given blob.
+	fn set_code(code: Vec<u8>) -> DispatchResult;
+}
+
+impl SetCode for () {
+	fn set_code(code: Vec<u8>) -> DispatchResult {
+		storage::unhashed::put_raw(well_known_keys::CODE, &code);
+		Ok(())
+	}
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -253,6 +266,10 @@ pub mod pallet {
 		/// an identifier of the chain.
 		#[pallet::constant]
 		type SS58Prefix: Get<u8>;
+
+		/// What to do if the user wants the code set to something. Just use `()` unless you are in
+		/// cumulus.
+		type OnSetCode: SetCode;
 	}
 
 	#[pallet::pallet]
@@ -329,7 +346,7 @@ pub mod pallet {
 			ensure_root(origin)?;
 			Self::can_set_code(&code)?;
 
-			storage::unhashed::put_raw(well_known_keys::CODE, &code);
+			T::OnSetCode::set_code(code)?;
 			Self::deposit_event(Event::CodeUpdated);
 			Ok(().into())
 		}
@@ -348,7 +365,7 @@ pub mod pallet {
 			code: Vec<u8>,
 		) -> DispatchResultWithPostInfo {
 			ensure_root(origin)?;
-			storage::unhashed::put_raw(well_known_keys::CODE, &code);
+			T::OnSetCode::set_code(code)?;
 			Self::deposit_event(Event::CodeUpdated);
 			Ok(().into())
 		}
@@ -638,7 +655,7 @@ pub mod pallet {
 	}
 }
 
-mod migrations {
+pub mod migrations {
 	use super::*;
 
 	#[allow(dead_code)]
@@ -853,7 +870,7 @@ impl<
 pub struct EnsureSignedBy<Who, AccountId>(sp_std::marker::PhantomData<(Who, AccountId)>);
 impl<
 	O: Into<Result<RawOrigin<AccountId>, O>> + From<RawOrigin<AccountId>>,
-	Who: Contains<AccountId>,
+	Who: SortedMembers<AccountId>,
 	AccountId: PartialEq + Clone + Ord + Default,
 > EnsureOrigin<O> for EnsureSignedBy<Who, AccountId> {
 	type Success = AccountId;
@@ -1430,6 +1447,18 @@ impl<T: Config> Pallet<T> {
 		<Events<T>>::kill();
 		EventCount::<T>::kill();
 		<EventTopics<T>>::remove_all();
+	}
+
+	/// Assert the given `event` exists.
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	pub fn assert_has_event(event: T::Event) {
+		assert!(Self::events().iter().any(|record| record.event == event))
+	}
+
+	/// Assert the last event equal to the given `event`.
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	pub fn assert_last_event(event: T::Event) {
+		assert_eq!(Self::events().last().expect("events expected").event, event);
 	}
 
 	/// Return the chain's current runtime version.
